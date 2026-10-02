@@ -32,6 +32,11 @@ export type ScheduledChange =
   | { atSec: number; nodeId: string; action: 'down' | 'up'; instance?: number }
   | { atSec: number; nodeId: string; action: 'latency'; extraLatencyMs: number };
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** A change applied immediately with `Simulation.inject`. */
+export type LiveChange = DistributiveOmit<ScheduledChange, 'atSec'>;
+
 export interface SimulationOptions {
   /** Record a full trace for every Nth request. Default 100. */
   traceEvery?: number;
@@ -274,6 +279,11 @@ export class Simulation implements Clock {
   /** Latest per-second sample, for live UI updates. */
   get latestSample(): EngineMetricsSample | undefined {
     return this.timeline[this.timeline.length - 1];
+  }
+
+  /** All per-second samples so far (read-only view; cheap, no copying or sorting). */
+  get samples(): readonly EngineMetricsSample[] {
+    return this.timeline;
   }
 
   /** Advances the simulation up to `untilMs` of simulated time. Returns true when finished. */
@@ -799,6 +809,14 @@ export class Simulation implements Clock {
   }
 
   // ── Changes (failure injection) ────────────────────────────
+
+  /**
+   * Applies a change right now, during a run: the live "Kill instance" or
+   * "Add latency" buttons in the UI. Same effect as a scheduled change at the current second.
+   */
+  inject(change: LiveChange): void {
+    this.applyChange({ ...change, atSec: this.clock / 1000 } as ScheduledChange);
+  }
 
   private applyChange(change: ScheduledChange): void {
     const node = this.nodes.get(change.nodeId);

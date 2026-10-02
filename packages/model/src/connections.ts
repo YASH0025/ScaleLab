@@ -84,6 +84,38 @@ export interface ConnectionCheck {
 
 const PASSIVE: Archetype[] = ['infra-group'];
 
+const NOUN: Record<Archetype, string> = {
+  client: 'client',
+  dns: 'DNS service',
+  cdn: 'CDN',
+  gateway: 'API gateway',
+  'load-balancer': 'load balancer',
+  'compute-service': 'backend service',
+  'serverless-function': 'serverless function',
+  'realtime-server': 'real-time server',
+  'auth-provider': 'auth provider',
+  cache: 'cache',
+  'relational-db': 'relational database',
+  'document-db': 'document database',
+  'wide-column-db': 'wide-column database',
+  'search-engine': 'search engine',
+  'vector-db': 'vector database',
+  'object-storage': 'object store',
+  'message-queue': 'message queue',
+  'event-stream': 'event stream',
+  worker: 'worker',
+  'external-api': 'external API',
+  'infra-group': 'infrastructure group',
+  observability: 'observability tool',
+};
+
+const withArticle = (a: Archetype) => `${/^[aeiou]/i.test(NOUN[a]) ? 'an' : 'a'} ${NOUN[a]}`;
+
+/** Human-readable name for an archetype, e.g. "relational database". */
+export function archetypeName(a: Archetype): string {
+  return NOUN[a];
+}
+
 export function checkConnection(source: Archetype, target: Archetype): ConnectionCheck {
   if (PASSIVE.includes(source) || PASSIVE.includes(target)) {
     return {
@@ -94,10 +126,11 @@ export function checkConnection(source: Archetype, target: Archetype): Connectio
   }
   const protocols = rules[source]?.[target] ?? [];
   if (protocols.length === 0) {
+    const from = withArticle(source);
     return {
       valid: false,
       protocols: [],
-      reason: `A ${source} can't talk to a ${target} directly. Route it through a service that owns that dependency.`,
+      reason: `${from[0]!.toUpperCase()}${from.slice(1)} can't connect directly to ${withArticle(target)}. Route it through a service that owns that dependency.`,
     };
   }
   return { valid: true, protocols: [...protocols] };

@@ -2,7 +2,7 @@
  * Headless demo: runs the ShopSphere launch-day ramp (500 → 5,000 rps over 60 s)
  * with and without Redis, and prints what happens second by second.
  *
- *   pnpm --filter @scalelab/engine demo
+ *   npm run demo -w @scalelab/engine
  */
 import { getLibrary } from '@scalelab/catalog';
 import { shopSphere } from '@scalelab/templates';

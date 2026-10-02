@@ -13,15 +13,15 @@
     "demo": "tsx scripts/demo.ts"
   },
   "dependencies": {
-    "@scalelab/model": "workspace:*"
+    "@scalelab/model": "*"
   },
   "devDependencies": {
-    "@scalelab/catalog": "workspace:*",
-    "@scalelab/config": "workspace:*",
-    "@scalelab/templates": "workspace:*",
+    "@scalelab/catalog": "*",
+    "@scalelab/config": "*",
+    "@scalelab/templates": "*",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^5.0.3"
   }
 }

@@ -12,19 +12,31 @@ Early development. This repository currently contains the foundation and the sim
 
 | Package | What it does |
 |---|---|
+| `apps/web` | The playground: Next.js app with the canvas, component library, inspector, live simulation and metrics |
 | `packages/model` | Shared architecture model: types and Zod schemas for nodes, edges, libraries, API flows, workloads and results; connection rules; design validation |
 | `packages/catalog` | Technologies and libraries as data, with realistic default settings |
 | `packages/engine` | Discrete-event simulation engine: traffic, queues, failures, retries, metrics and traces. Pure TypeScript, runs in a Web Worker or Node |
 | `packages/templates` | Ready-to-run architectures, starting with ShopSphere (e-commerce) |
 | `packages/config` | Shared TypeScript configuration |
 
-Next up: the canvas app (`apps/web`).
+Next up: sharing designs by link, request traces, and more simulated technologies.
+
+## Run the playground
+
+```bash
+npm install
+npm run dev -w @scalelab/web
+```
+
+Open http://localhost:3000, try the e-commerce example, and press **Run**. Then delete Redis and run again to watch PostgreSQL become the bottleneck, or select the backend and kill an instance mid-run.
+
+Your design saves automatically in your browser.
 
 ## Try the engine
 
 ```bash
-pnpm install
-pnpm --filter @scalelab/engine demo
+npm install
+npm run demo -w @scalelab/engine
 ```
 
 This runs the ShopSphere launch-day ramp (500 → 5,000 requests per second) with and without Redis. Without the cache, PostgreSQL saturates around 2,700 rps and errors climb; with it, the same traffic is served with no errors.
@@ -41,20 +53,31 @@ Every technology maps to a **behavior archetype** the engine knows how to simula
 
 The MVP simulates five archetypes: `client`, `load-balancer`, `compute-service`, `cache` and `relational-db`. Other technologies can already be placed and connected, and show a "simulation coming soon" badge.
 
+## Deploy to Vercel
+
+The playground is a standard Next.js app inside an npm workspace.
+
+1. On vercel.com, choose **Add New → Project** and import this GitHub repository.
+2. Set **Root Directory** to `apps/web`. Vercel detects Next.js and installs the workspace from the repo root.
+3. Leave the build settings on their defaults and click **Deploy**.
+
+No environment variables are needed: everything runs in the visitor's browser.
+
 ## Development
 
-Requirements: Node.js 20+ and pnpm 10.
+Requirements: Node.js 20+ and npm 10.
 
 ```bash
-pnpm install
-pnpm typecheck   # TypeScript across all packages
-pnpm test        # Vitest across all packages
+npm install
+npm run typecheck   # TypeScript across all packages
+npm test            # Vitest across all packages
 ```
 
 ## Repository layout
 
 ```
-apps/            # web app (Next.js), API (NestJS) and collaboration server, later
+apps/
+  web/           # Next.js playground (API and collaboration server come later)
 packages/
   config/        # shared tsconfig
   model/         # types, schemas, connection rules, validation

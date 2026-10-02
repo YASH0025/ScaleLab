@@ -1,5 +1,6 @@
 import { getLibrary } from '@scalelab/catalog';
-import type { ApiFlow, Design, Workload } from '@scalelab/model';
+import { deriveFlows, derivedMix, type ApiFlow, type Design, type Workload } from '@scalelab/model';
+import { resolveArchetype } from '@scalelab/catalog';
 import { shopSphere, type ShopSphereOptions } from '@scalelab/templates';
 import { describe, expect, it } from 'vitest';
 import { type ScheduledChange, type SimulationOptions, createSimulation, simulate } from '../src';
@@ -225,6 +226,22 @@ describe('failures', () => {
     expect(slow.totals.p50Ms).toBeGreaterThan(base.totals.p50Ms + 80);
   });
 
+  it('live injection matches a scheduled change at the same second', () => {
+    const design = shopSphere({ cache: true });
+    const workload = { ...design.workloads[0]!, durationSec: 30, pattern: { kind: 'constant' as const, rps: 800 } };
+    const scheduled = simulate(design, workload, {
+      libraryEffect,
+      changes: [{ atSec: 10, nodeId: 'api', instance: 0, action: 'down' }],
+    });
+    const live = createSimulation(design, workload, { libraryEffect });
+    live.runUntil(10_000);
+    live.inject({ nodeId: 'api', instance: 0, action: 'down' });
+    live.runUntil(Number.POSITIVE_INFINITY);
+    const after = live.result().timeline.find((s) => s.simTimeSec === 20)!.nodes.find((n) => n.nodeId === 'api')!;
+    expect(after.instances![0]!.up).toBe(false);
+    expect(live.result().totals.completed).toBeGreaterThan(scheduled.totals.completed * 0.98);
+  });
+
   it('retries amplify load on an overloaded system', () => {
     const design = singleService({ workers: 1, meanMs: 100, queueLimit: 5 });
     const noRetry = simulate(design, steady(30, 20));
@@ -277,5 +294,16 @@ describe('results', () => {
     const bare = simulate(design, { ...design.workloads[0]!, durationSec: 20, pattern: { kind: 'constant', rps: 300 } });
     // Spring Data JPA adds ~2 ms per request in the catalog.
     expect(withLibs.totals.meanMs).toBeGreaterThan(bare.totals.meanMs);
+  });
+
+  it('runs designs with flows derived from the graph like the hand-written template', () => {
+    const design = shopSphere({ cache: false });
+    const { flows } = deriveFlows(design.nodes, design.edges, resolveArchetype);
+    const workload: Workload = { id: 'w', name: 'w', durationSec: 30, pattern: { kind: 'constant', rps: 4000 }, mix: derivedMix(flows), seed: 42 };
+    const derived = simulate({ ...design, flows }, workload, { libraryEffect });
+    const handWritten = run({ cache: false }, 4000).result;
+    const ratio = derived.totals.completed / handWritten.totals.completed;
+    expect(ratio).toBeGreaterThan(0.9);
+    expect(ratio).toBeLessThan(1.1);
   });
 });

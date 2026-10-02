@@ -23,8 +23,8 @@ Next up: the canvas app (`apps/web`).
 ## Try the engine
 
 ```bash
-pnpm install
-pnpm --filter @scalelab/engine demo
+npm install
+npm run demo -w @scalelab/engine
 ```
 
 This runs the ShopSphere launch-day ramp (500 → 5,000 requests per second) with and without Redis. Without the cache, PostgreSQL saturates around 2,700 rps and errors climb; with it, the same traffic is served with no errors.
@@ -43,12 +43,12 @@ The MVP simulates five archetypes: `client`, `load-balancer`, `compute-service`,
 
 ## Development
 
-Requirements: Node.js 20+ and pnpm 10.
+Requirements: Node.js 20+ and npm 10.
 
 ```bash
-pnpm install
-pnpm typecheck   # TypeScript across all packages
-pnpm test        # Vitest across all packages
+npm install
+npm run typecheck   # TypeScript across all packages
+npm test            # Vitest across all packages
 ```
 
 ## Repository layout

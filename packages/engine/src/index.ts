@@ -8,6 +8,7 @@ export {
   type EngineMetricsSample,
   type EngineNodeSample,
   type InstanceSample,
+  type LiveChange,
   type NodeSummary,
   type ScheduledChange,
   type SimulationOptions,

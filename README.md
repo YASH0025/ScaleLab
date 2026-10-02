@@ -12,13 +12,25 @@ Early development. This repository currently contains the foundation and the sim
 
 | Package | What it does |
 |---|---|
+| `apps/web` | The playground: Next.js app with the canvas, component library, inspector, live simulation and metrics |
 | `packages/model` | Shared architecture model: types and Zod schemas for nodes, edges, libraries, API flows, workloads and results; connection rules; design validation |
 | `packages/catalog` | Technologies and libraries as data, with realistic default settings |
 | `packages/engine` | Discrete-event simulation engine: traffic, queues, failures, retries, metrics and traces. Pure TypeScript, runs in a Web Worker or Node |
 | `packages/templates` | Ready-to-run architectures, starting with ShopSphere (e-commerce) |
 | `packages/config` | Shared TypeScript configuration |
 
-Next up: the canvas app (`apps/web`).
+Next up: sharing designs by link, request traces, and more simulated technologies.
+
+## Run the playground
+
+```bash
+npm install
+npm run dev -w @scalelab/web
+```
+
+Open http://localhost:3000, try the e-commerce example, and press **Run**. Then delete Redis and run again to watch PostgreSQL become the bottleneck, or select the backend and kill an instance mid-run.
+
+Your design saves automatically in your browser.
 
 ## Try the engine
 
@@ -54,7 +66,8 @@ npm test            # Vitest across all packages
 ## Repository layout
 
 ```
-apps/            # web app (Next.js), API (NestJS) and collaboration server, later
+apps/
+  web/           # Next.js playground (API and collaboration server come later)
 packages/
   config/        # shared tsconfig
   model/         # types, schemas, connection rules, validation

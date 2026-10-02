@@ -13,7 +13,7 @@ describe('checkConnection', () => {
   it('rejects a client talking to a database directly, with a reason', () => {
     const check = checkConnection('client', 'relational-db');
     expect(check.valid).toBe(false);
-    expect(check.reason).toMatch(/can't talk/);
+    expect(check.reason).toBe("A client can't connect directly to a relational database. Route it through a service that owns that dependency.");
   });
 
   it('rejects connections to infrastructure groups', () => {

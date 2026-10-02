@@ -1,0 +1,22 @@
+{
+  "name": "@scalelab/model",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared architecture model: types, schemas and connection rules used by the canvas and the simulation engine.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@scalelab/config": "workspace:*",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

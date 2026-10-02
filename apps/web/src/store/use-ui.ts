@@ -10,10 +10,13 @@ interface UiState {
   selectedNodeId: string | undefined;
   toasts: Toast[];
   celebrating: boolean;
+  /** Set while viewing a design opened from a share link. */
+  sharedBanner: { name: string; canRestore: boolean } | undefined;
   select: (id: string | undefined) => void;
   toast: (message: string, tone?: Toast['tone']) => void;
   dismiss: (id: number) => void;
   celebrate: () => void;
+  setSharedBanner: (banner: UiState['sharedBanner']) => void;
 }
 
 let nextToast = 1;
@@ -22,6 +25,7 @@ export const useUi = create<UiState>((set) => ({
   selectedNodeId: undefined,
   toasts: [],
   celebrating: false,
+  sharedBanner: undefined,
   select: (id) => set({ selectedNodeId: id }),
   toast: (message, tone = 'info') => {
     const id = nextToast++;
@@ -33,4 +37,5 @@ export const useUi = create<UiState>((set) => ({
     set({ celebrating: true });
     setTimeout(() => set({ celebrating: false }), 2600);
   },
+  setSharedBanner: (sharedBanner) => set({ sharedBanner }),
 }));

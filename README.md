@@ -53,6 +53,16 @@ Every technology maps to a **behavior archetype** the engine knows how to simula
 
 The MVP simulates five archetypes: `client`, `load-balancer`, `compute-service`, `cache` and `relational-db`. Other technologies can already be placed and connected, and show a "simulation coming soon" badge.
 
+## Deploy to Vercel
+
+The playground is a standard Next.js app inside an npm workspace.
+
+1. On vercel.com, choose **Add New → Project** and import this GitHub repository.
+2. Set **Root Directory** to `apps/web`. Vercel detects Next.js and installs the workspace from the repo root.
+3. Leave the build settings on their defaults and click **Deploy**.
+
+No environment variables are needed: everything runs in the visitor's browser.
+
 ## Development
 
 Requirements: Node.js 20+ and npm 10.

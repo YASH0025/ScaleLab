@@ -1,0 +1,22 @@
+{
+  "name": "@scalelab/catalog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Technologies and libraries as data, with realistic default settings.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@scalelab/model": "workspace:*"
+  },
+  "devDependencies": {
+    "@scalelab/config": "workspace:*",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

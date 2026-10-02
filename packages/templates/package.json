@@ -1,0 +1,23 @@
+{
+  "name": "@scalelab/templates",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ready-made architectures a first-time visitor can run with one click.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@scalelab/catalog": "workspace:*",
+    "@scalelab/model": "workspace:*"
+  },
+  "devDependencies": {
+    "@scalelab/config": "workspace:*",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

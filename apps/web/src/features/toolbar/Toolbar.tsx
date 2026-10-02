@@ -2,6 +2,7 @@
 
 import { shopSphere } from '@scalelab/templates';
 import { useState } from 'react';
+import { ShareButton } from '@/features/share/ShareButton';
 import { clearDesign, loadDesign, renameDesign } from '@/store/design-doc';
 import { useDesign } from '@/store/use-design';
 import { SPEEDS, type TrafficSettings, useSim } from '@/store/use-sim';
@@ -178,6 +179,8 @@ export function Toolbar() {
         </button>
         {trafficOpen && <TrafficPopover onClose={() => setTrafficOpen(false)} />}
       </div>
+      <div className="mx-1 h-6 w-px bg-line" aria-hidden="true" />
+      <ShareButton className={btn} />
     </header>
   );
 }

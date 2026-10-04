@@ -1,6 +1,6 @@
 'use client';
 
-import { shopSphere } from '@scalelab/templates';
+import { microShop, shopSphere } from '@scalelab/templates';
 import { ReactFlowProvider } from '@xyflow/react';
 import { useEffect } from 'react';
 import { Canvas } from '@/features/canvas/Canvas';
@@ -52,6 +52,7 @@ export function Workspace({ template }: { template: string | undefined }) {
       if (cancelled) return;
       if (!openSharedLink()) {
         if (template === 'shopsphere' || (template === undefined && isEmpty())) loadDesign(shopSphere());
+        else if (template === 'microservices') loadDesign(microShop());
         else if (template === 'blank') clearDesign();
         if (template) window.history.replaceState(null, '', '/play');
       }

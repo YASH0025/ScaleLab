@@ -4,6 +4,7 @@ import { backendTechnologies } from './technologies/backends';
 import { clientTechnologies } from './technologies/clients';
 import { dataTechnologies } from './technologies/data';
 import { loadBalancerTechnologies } from './technologies/load-balancers';
+import { messagingTechnologies, workerTechnologies } from './technologies/messaging';
 import { upcomingTechnologies } from './technologies/upcoming';
 
 export { SIMULATED_ARCHETYPES, isSimulated } from './defaults';
@@ -13,6 +14,8 @@ export const technologies: readonly TechnologyDefinition[] = [
   ...loadBalancerTechnologies,
   ...backendTechnologies,
   ...dataTechnologies,
+  ...messagingTechnologies,
+  ...workerTechnologies,
   ...upcomingTechnologies,
 ];
 

@@ -119,7 +119,7 @@ export const useSim = create<SimState>((set, get) => ({
 
   run: () => {
     const { name, nodes, edges } = snapshot();
-    const { flows, hints } = deriveFlows(nodes, edges, resolveArchetype);
+    const { flows, handlers, hints } = deriveFlows(nodes, edges, resolveArchetype);
     set({ hints });
     if (flows.length === 0) {
       useUi.getState().toast(hints[0] ?? 'Nothing to simulate yet.', 'error');
@@ -132,6 +132,7 @@ export const useSim = create<SimState>((set, get) => ({
       nodes,
       edges,
       flows,
+      handlers,
       workloads: [],
     };
     const workload: Workload = {

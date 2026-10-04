@@ -142,6 +142,29 @@ export const RelationalDbConfigSchema = z.object({
   readReplicas: z.number().int().min(0),
 });
 
+/**
+ * Message brokers (RabbitMQ, SQS) and event streams (Kafka, Redpanda).
+ * Producers don't wait for consumers; messages wait in a backlog until a consumer is free.
+ */
+export const QueueConfigSchema = z.object({
+  type: z.literal('queue'),
+  ...base,
+  /** Backlog size at which the broker pushes back and publishes are rejected. */
+  maxBacklog: z.number().int().min(1),
+  /** Time for the broker to acknowledge a publish. */
+  publishLatency: DistributionSchema,
+  /**
+   * Event streams only: a consumer group processes at most this many messages at once
+   * (one per partition). 0 means no limit.
+   */
+  partitions: z.number().int().min(0),
+  /**
+   * true: every consumer group gets its own copy of each message (Kafka, Redpanda).
+   * false: consumers compete and each message is processed once (RabbitMQ, SQS).
+   */
+  fanOut: z.boolean(),
+});
+
 /** Archetypes the engine does not simulate yet carry free-form params. */
 export const GenericConfigSchema = z.object({
   type: z.literal('generic'),
@@ -155,6 +178,7 @@ export const ArchetypeConfigSchema = z.discriminatedUnion('type', [
   ComputeConfigSchema,
   CacheConfigSchema,
   RelationalDbConfigSchema,
+  QueueConfigSchema,
   GenericConfigSchema,
 ]);
 export type ArchetypeConfig = z.infer<typeof ArchetypeConfigSchema>;
@@ -163,6 +187,7 @@ export type LoadBalancerConfig = z.infer<typeof LoadBalancerConfigSchema>;
 export type ComputeConfig = z.infer<typeof ComputeConfigSchema>;
 export type CacheConfig = z.infer<typeof CacheConfigSchema>;
 export type RelationalDbConfig = z.infer<typeof RelationalDbConfigSchema>;
+export type QueueConfig = z.infer<typeof QueueConfigSchema>;
 export type GenericConfig = z.infer<typeof GenericConfigSchema>;
 
 // ─────────────────────────────────────────────────────────────
@@ -276,7 +301,17 @@ export type ArchEdge = z.infer<typeof ArchEdgeSchema>;
 // API flows: what happens when a request arrives
 // ─────────────────────────────────────────────────────────────
 export type FlowStep =
+  /**
+   * Uses a node. On a backend the first call takes one of its workers and keeps it
+   * until the request finishes (the entry service). On a cache or database it is one round trip.
+   */
   | { kind: 'call'; nodeId: string; operation: 'read' | 'write' | 'process' }
+  /**
+   * A synchronous call to another backend service (microservices). The callee takes a
+   * worker, does its own work, runs `steps` (its own dependencies), then frees the worker
+   * and replies. The caller's worker stays busy waiting the whole time.
+   */
+  | { kind: 'service-call'; nodeId: string; steps: FlowStep[] }
   | {
       kind: 'cache-lookup';
       cacheNodeId: string;
@@ -285,6 +320,7 @@ export type FlowStep =
       writeBackOnMiss: boolean;
     }
   | { kind: 'parallel'; branches: FlowStep[][] }
+  /** Sends a message to a queue or stream and continues without waiting for consumers. */
   | { kind: 'publish'; nodeId: string }
   | { kind: 'respond'; status: number };
 
@@ -295,6 +331,7 @@ export const FlowStepSchema: z.ZodType<FlowStep> = z.lazy(() =>
       nodeId: z.string(),
       operation: z.enum(['read', 'write', 'process']),
     }),
+    z.object({ kind: z.literal('service-call'), nodeId: z.string(), steps: z.array(FlowStepSchema) }),
     z.object({
       kind: z.literal('cache-lookup'),
       cacheNodeId: z.string(),
@@ -358,6 +395,18 @@ export type Workload = z.infer<typeof WorkloadSchema>;
 // ─────────────────────────────────────────────────────────────
 // A complete design (what the Yjs document stores)
 // ─────────────────────────────────────────────────────────────
+/**
+ * What a consumer does with each message it takes from a queue or stream.
+ * The first step usually takes a worker on the consumer for the whole job.
+ */
+export const MessageHandlerSchema = z.object({
+  id: z.string().min(1),
+  queueNodeId: z.string(),
+  consumerNodeId: z.string(),
+  steps: z.array(FlowStepSchema),
+});
+export type MessageHandler = z.infer<typeof MessageHandlerSchema>;
+
 export const DesignSchema = z.object({
   schemaVersion: z.literal(1),
   meta: z.object({
@@ -368,6 +417,8 @@ export const DesignSchema = z.object({
   nodes: z.array(ArchNodeSchema),
   edges: z.array(ArchEdgeSchema),
   flows: z.array(ApiFlowSchema),
+  /** Consumers of queues and streams. Optional so older designs stay valid. */
+  handlers: z.array(MessageHandlerSchema).optional(),
   workloads: z.array(WorkloadSchema),
 });
 export type Design = z.infer<typeof DesignSchema>;

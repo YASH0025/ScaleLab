@@ -225,6 +225,48 @@ export const libraries: LibraryDefinition[] = [
     effect: { kind: 'add-overhead', perRequestMs: 3 },
   },
 
+  // ── Messaging clients ──
+  {
+    id: 'spring-kafka',
+    name: 'Spring for Apache Kafka',
+    category: 'messaging-client',
+    icon: 'apachekafka',
+    brandColor: '#231F20',
+    compatibleWith: ['spring-boot', 'kafka-consumer'],
+    conflictsWith: [],
+    effect: { kind: 'none' },
+  },
+  {
+    id: 'spring-amqp',
+    name: 'Spring AMQP',
+    category: 'messaging-client',
+    icon: 'rabbitmq',
+    brandColor: '#FF6600',
+    compatibleWith: ['spring-boot'],
+    conflictsWith: [],
+    effect: { kind: 'none' },
+  },
+  {
+    id: 'kafkajs',
+    name: 'KafkaJS',
+    category: 'messaging-client',
+    icon: 'apachekafka',
+    brandColor: '#231F20',
+    compatibleWith: [...NODE_BACKENDS, 'bullmq-worker', 'kafka-consumer'],
+    conflictsWith: [],
+    effect: { kind: 'none' },
+  },
+  {
+    id: 'amqplib',
+    name: 'amqplib',
+    category: 'messaging-client',
+    icon: 'rabbitmq',
+    brandColor: '#FF6600',
+    compatibleWith: NODE_BACKENDS,
+    conflictsWith: [],
+    effect: { kind: 'none' },
+  },
+
   // ── Cross-cutting ──
   {
     id: 'opentelemetry-sdk',

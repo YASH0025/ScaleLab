@@ -16,10 +16,10 @@ Early development. This repository currently contains the foundation and the sim
 | `packages/model` | Shared architecture model: types and Zod schemas for nodes, edges, libraries, API flows, workloads and results; connection rules; design validation |
 | `packages/catalog` | Technologies and libraries as data, with realistic default settings |
 | `packages/engine` | Discrete-event simulation engine: traffic, queues, failures, retries, metrics and traces. Pure TypeScript, runs in a Web Worker or Node |
-| `packages/templates` | Ready-to-run architectures, starting with ShopSphere (e-commerce) |
+| `packages/templates` | Ready-to-run architectures: ShopSphere (e-commerce) and ShopSphere microservices (services + Kafka + workers) |
 | `packages/config` | Shared TypeScript configuration |
 
-Next up: sharing designs by link, request traces, and more simulated technologies.
+Roadmap: capacity planner and cost estimator, infrastructure import, trace calibration, architecture as code with a CI check, and live changes with "what will break" impact analysis.
 
 ## Run the playground
 
@@ -28,7 +28,7 @@ npm install
 npm run dev -w @scalelab/web
 ```
 
-Open http://localhost:3000, try the e-commerce example, and press **Run**. Then delete Redis and run again to watch PostgreSQL become the bottleneck, or select the backend and kill an instance mid-run.
+Open http://localhost:3000, try the e-commerce example or the microservices + Kafka example, and press **Run**. Then delete Redis and run again to watch PostgreSQL become the bottleneck, or select the backend and kill an instance mid-run.
 
 Your design saves automatically in your browser.
 
@@ -51,7 +51,15 @@ Runs are deterministic: the same design and seed give identical results on every
 
 Every technology maps to a **behavior archetype** the engine knows how to simulate. Spring Boot, NestJS and Django are all a `compute-service`; PostgreSQL and MySQL are both a `relational-db`. Only their default numbers differ. Adding a new technology or library is a catalog entry, not new engine code.
 
-The MVP simulates five archetypes: `client`, `load-balancer`, `compute-service`, `cache` and `relational-db`. Other technologies can already be placed and connected, and show a "simulation coming soon" badge.
+The engine simulates `client`, `load-balancer`, `compute-service`, `cache`, `relational-db`, `message-queue`, `event-stream` and `worker`. Other technologies can already be placed and connected, and show a "simulation coming soon" badge.
+
+### Microservices and async messaging
+
+- **Service-to-service calls**: a service can call other services. The callee takes a worker, does its own work and dependencies, then frees the worker and replies; the caller waits the whole time, so a slow or saturated downstream service slows everything above it.
+- **Queues and streams**: producers wait only for the broker's acknowledgement. Messages wait in a backlog until a consumer is free. Streams (Kafka, Redpanda) give every consumer group every message, and partitions cap how many are processed at once; queues (RabbitMQ, SQS) make consumers share the work.
+- **Failure behavior**: a full backlog rejects publishes; a broker outage fails the requests that publish; a consumer outage builds a backlog that drains when it returns; messages that keep failing are retried, then dead-lettered.
+
+Flows are derived from the canvas: every service behind the entry point gets traffic, calls follow the arrows between services, and writes publish to the queues a service is connected to.
 
 ## Deploy to Vercel
 

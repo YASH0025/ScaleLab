@@ -114,7 +114,11 @@ export function MetricsDrawer() {
             </div>
             <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">
               {status === 'done' && totals
-                ? `${totals.completed.toLocaleString()} of ${totals.arrivals.toLocaleString()} requests served · p95 ${fmtMs(totals.p95Ms)} · peak ${fmtRps(totals.peakThroughputRps)}.`
+                ? `${totals.completed.toLocaleString()} of ${totals.arrivals.toLocaleString()} requests served · p95 ${fmtMs(totals.p95Ms)} · peak ${fmtRps(totals.peakThroughputRps)}.${
+                    totals.messagesPublished > 0
+                      ? ` ${totals.messagesPublished.toLocaleString()} messages published, ${totals.messagesConsumed.toLocaleString()} processed${totals.messagesDeadLettered > 0 ? `, ${totals.messagesDeadLettered.toLocaleString()} dead-lettered` : ''}.`
+                      : ''
+                  }`
                 : 'Every component has headroom. Turn up the traffic or break something in the inspector.'}
             </p>
             <p className="mt-auto pt-2 text-[11px] text-faint">Modeled estimates from your settings, not measurements.</p>

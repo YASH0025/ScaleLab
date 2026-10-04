@@ -219,6 +219,12 @@ export function readUnits(files: RepoFile[], projectName: string): Unit[] {
       if (provider === 'sqlite') unit.notes.push(`${unit.name} uses SQLite through Prisma. SQLite runs inside the app, so it isn't shown as its own component.`);
     }
   }
+  const all = [...units.values()];
+  const isApp = (u: Unit) => Boolean(u.framework || u.frontend || u.worker || u.grpc);
+  for (const unit of all) {
+    const parent = all.find((p) => p !== unit && p.ecosystem === unit.ecosystem && p.dir !== '' && unit.dir.startsWith(`${p.dir}/`) && isApp(p));
+    if (parent) units.delete(`${unit.dir}|${unit.ecosystem}`);
+  }
   for (const unit of units.values()) {
     if (!unit.framework && !unit.frontend && unit.grpc) {
       const name = unit.grpc.tech;

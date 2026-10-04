@@ -1,0 +1,25 @@
+{
+  "name": "@scalelab/importer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reads a project's files (docker-compose, package.json, requirements.txt, pom.xml, go.mod, .env) and turns them into a ScaleLab design.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@scalelab/catalog": "*",
+    "@scalelab/model": "*",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@scalelab/config": "*",
+    "@scalelab/engine": "*",
+    "typescript": "^5.6.0",
+    "vitest": "^5.0.3"
+  }
+}

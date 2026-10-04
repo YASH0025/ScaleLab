@@ -11,7 +11,10 @@ interface UiState {
   toasts: Toast[];
   celebrating: boolean;
   /** Set while viewing a design opened from a share link. */
-  sharedBanner: { name: string; canRestore: boolean } | undefined;
+  sharedBanner: { name: string; canRestore: boolean; kind?: 'shared' | 'imported' } | undefined;
+  /** Bumped to ask the canvas to fit everything in view (after loading a design). */
+  fitRequest: number;
+  requestFit: () => void;
   select: (id: string | undefined) => void;
   toast: (message: string, tone?: Toast['tone']) => void;
   dismiss: (id: number) => void;
@@ -26,6 +29,8 @@ export const useUi = create<UiState>((set) => ({
   toasts: [],
   celebrating: false,
   sharedBanner: undefined,
+  fitRequest: 0,
+  requestFit: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
   select: (id) => set({ selectedNodeId: id }),
   toast: (message, tone = 'info') => {
     const id = nextToast++;

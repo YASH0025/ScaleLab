@@ -17,6 +17,7 @@ Early development. This repository currently contains the foundation and the sim
 | `packages/catalog` | Technologies and libraries as data, with realistic default settings |
 | `packages/engine` | Discrete-event simulation engine: traffic, queues, failures, retries, metrics and traces. Pure TypeScript, runs in a Web Worker or Node |
 | `packages/planner` | Cost estimates from list prices, and a capacity planner that finds the cheapest setup meeting your targets |
+| `packages/importer` | Reads a project's setup files (docker-compose, package.json, requirements.txt, pom.xml, go.mod, .csproj, .env…) and turns them into a design |
 | `packages/templates` | Ready-to-run architectures: ShopSphere (e-commerce), ShopSphere microservices (services + Kafka + workers) and ShopSphere checkout (Auth0, Stripe, SendGrid and a Checkout journey) |
 | `packages/config` | Shared TypeScript configuration |
 
@@ -67,6 +68,21 @@ Flows are derived from the canvas: every service behind the entry point gets tra
 - **Cost estimate**: every component has a list-price estimate (AWS us-east-1, on-demand, checked October 2026): backends per instance, databases sized by concurrent queries plus read replicas, caches, Kafka clusters, load balancer capacity units, and SQS per message. Storage, data transfer, frontend hosting and discounts are not included.
 - **Plan capacity**: set a traffic level and targets (p95 latency, error rate, queue lag, and headroom: how busy any component may be). The planner simulates candidate setups the way an engineer would (scale the component closest to the root cause, keep the change that helps most per dollar) and then removes anything that isn't needed. It recommends the cheapest setup that meets every target, and applies it to the canvas in one click.
 - It changes capacity only (instances, read replicas, database size, partitions). When only faster code or a cache would help, it says so instead.
+
+## Import your project
+
+Paste a public GitHub link (`github.com/owner/repo`, or a `/tree/branch/folder` link) or choose a folder from your computer. ScaleLab draws your architecture from your setup files and shows what it found before loading anything.
+
+- **What it reads**: docker-compose (the main file and its override), package.json, requirements.txt, pyproject.toml, Pipfile, pom.xml, build.gradle, go.mod, .csproj, Dockerfiles (for the base image), Prisma schemas and .env examples. Never source code. `node_modules`, tests, examples and docs are skipped, and at most 200 files are read.
+- **How it decides**:
+  - Containers by image: `postgres:16` is PostgreSQL, `bitnami/kafka` is Kafka, `traefik` is modeled as Nginx. Dev tools (pgAdmin, MailHog, Kafka UI…) and ZooKeeper are skipped.
+  - Apps by their dependencies: `@nestjs/core` is NestJS, `django` is Django, `spring-boot-starter-web` is Spring Boot, `github.com/gin-gonic/gin` is Gin. Similar frameworks are modeled as the closest one (Flask as FastAPI, Fastify as Express) and say so.
+  - What apps talk to, from client packages (`pg`, `ioredis`, `kafkajs`, `stripe`…), connection strings in env (`postgres://…@db`) and `depends_on`.
+  - Workers from compose commands (`celery … worker`) or from projects with no web framework that read a queue. Celery, BullMQ and Sidekiq jobs on Redis become a **Redis job queue**.
+  - A full-stack Next.js app becomes the frontend plus its server code.
+- **Review**: every component shows its evidence (like `kafkajs in api/package.json`). Inferences are marked "guess", and anything skipped is listed with the reason. Untick what's wrong, then load.
+- **Privacy**: GitHub repos are read straight from GitHub by your browser. Folders are read in your browser and never uploaded. Private repos need GitHub sign-in, which comes later; until then, use the folder option.
+- **Limits**: 60 GitHub API reads an hour without signing in, and one import uses 2 (files come from raw.githubusercontent.com, which is not counted). Calls between services are only known from compose `depends_on` and URLs in env, so for many independent services traffic starts at all of them. Kubernetes and Terraform come in version 2.
 
 ## Business journeys and failure paths
 

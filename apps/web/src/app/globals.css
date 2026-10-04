@@ -105,3 +105,15 @@ body {
 
 /* Inputs */
 input[type='number']::-webkit-inner-spin-button { opacity: 0.4; }
+
+/* Indeterminate progress: a bar sliding across, for work with no known length. */
+@keyframes indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+.anim-indeterminate {
+  animation: indeterminate 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-indeterminate { animation: none; width: 100%; opacity: 0.6; }
+}

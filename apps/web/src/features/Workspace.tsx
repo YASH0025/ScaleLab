@@ -5,6 +5,7 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { useEffect } from 'react';
 import { Canvas } from '@/features/canvas/Canvas';
 import { Inspector } from '@/features/inspector/Inspector';
+import { ImportPanel } from '@/features/import/ImportPanel';
 import { JourneysPanel } from '@/features/journeys/JourneysPanel';
 import { LibraryPanel } from '@/features/library/LibraryPanel';
 import { MetricsDrawer } from '@/features/metrics/MetricsDrawer';
@@ -16,6 +17,7 @@ import { clearBackup, saveBackup } from '@/lib/backup';
 import { decodeDesign, readHash } from '@/lib/share';
 import { clearDesign, isEmpty, loadDesign, snapshot, startPersistence } from '@/store/design-doc';
 import { useDesign } from '@/store/use-design';
+import { useImport } from '@/store/use-import';
 import { useJourneys } from '@/store/use-journeys';
 import { useSim } from '@/store/use-sim';
 import { useUi } from '@/store/use-ui';
@@ -66,6 +68,7 @@ export function Workspace({ template }: { template: string | undefined }) {
           useJourneys.getState().show('list');
         }
         else if (template === 'blank') clearDesign();
+        else if (template === 'import') useImport.getState().show();
         if (template) window.history.replaceState(null, '', '/play');
       }
       useDesign.getState().setReady();
@@ -99,6 +102,7 @@ export function Workspace({ template }: { template: string | undefined }) {
       <MetricsDrawer />
       <PlanPanel />
       <JourneysPanel />
+      <ImportPanel />
       <Toasts />
       <Celebration />
     </div>

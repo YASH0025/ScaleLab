@@ -36,6 +36,8 @@ const BY_TECHNOLOGY: Record<string, Pricing> = {
   nginx: compute,
   haproxy: compute,
   redis: { kind: 'node', hourlyUsd: HOURLY.elasticacheM6gLarge, instanceClass: 'cache.m6g.large' },
+  // A Redis used only for jobs is its own ElastiCache node; one shared with caching costs nothing extra.
+  'redis-queue': { kind: 'node', hourlyUsd: HOURLY.elasticacheM6gLarge, instanceClass: 'cache.m6g.large' },
   memcached: { kind: 'node', hourlyUsd: HOURLY.elasticacheM6gLarge, instanceClass: 'cache.m6g.large' },
   // ElastiCache for Valkey node pricing is 20% below Redis OSS.
   valkey: { kind: 'node', hourlyUsd: Math.round(HOURLY.elasticacheM6gLarge * 0.8 * 10_000) / 10_000, instanceClass: 'cache.m6g.large' },

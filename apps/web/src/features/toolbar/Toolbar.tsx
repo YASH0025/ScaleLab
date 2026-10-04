@@ -3,6 +3,7 @@
 import { checkoutShop, microShop, shopSphere } from '@scalelab/templates';
 import { useState } from 'react';
 import { ShareButton } from '@/features/share/ShareButton';
+import { useImport } from '@/store/use-import';
 import { useJourneys } from '@/store/use-journeys';
 import { usePlan } from '@/store/use-plan';
 import { clearDesign, loadDesign, renameDesign } from '@/store/design-doc';
@@ -110,9 +111,20 @@ export function Toolbar() {
             <button
               className="w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-raised"
               onClick={() => {
+                setMenuOpen(false);
+                useImport.getState().show();
+              }}
+            >
+              Import your project…
+            </button>
+            <div className="my-1 h-px bg-line" />
+            <button
+              className="w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-raised"
+              onClick={() => {
                 reset();
                 select(undefined);
                 loadDesign(shopSphere());
+                useUi.getState().requestFit();
                 setMenuOpen(false);
               }}
             >
@@ -124,6 +136,7 @@ export function Toolbar() {
                 reset();
                 select(undefined);
                 loadDesign(microShop());
+                useUi.getState().requestFit();
                 setMenuOpen(false);
               }}
             >
@@ -135,6 +148,7 @@ export function Toolbar() {
                 reset();
                 select(undefined);
                 loadDesign(checkoutShop());
+                useUi.getState().requestFit();
                 setMenuOpen(false);
                 useJourneys.getState().show('list');
               }}
@@ -205,6 +219,14 @@ export function Toolbar() {
         {trafficOpen && <TrafficPopover onClose={() => setTrafficOpen(false)} />}
       </div>
       <div className="mx-1 h-6 w-px bg-line" aria-hidden="true" />
+      <button onClick={() => useImport.getState().show()} className={btn} title="Draw your architecture from a GitHub repo or a folder">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <path d="M12 3v12" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M5 21h14" />
+        </svg>
+        Import
+      </button>
       <button onClick={() => useJourneys.getState().show('list')} className={btn} title="Send users through your system step by step">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
           <circle cx="5" cy="6" r="2" />

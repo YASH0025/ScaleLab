@@ -28,11 +28,11 @@ export function SharedBanner() {
 
   return (
     <div className="anim-toast absolute left-1/2 top-3 z-10 flex max-w-[92%] -translate-x-1/2 items-center gap-3 rounded-xl border border-accent/50 bg-panel px-4 py-2.5 text-[13px] shadow-2xl">
-      <span aria-hidden="true">🔗</span>
+      <span aria-hidden="true">{banner.kind === 'imported' ? '📦' : '🔗'}</span>
       <span className="min-w-0">
-        <span className="text-muted">Opened a shared design: </span>
+        <span className="text-muted">{banner.kind === 'imported' ? 'Imported ' : 'Opened a shared design: '}</span>
         <span className="font-semibold">{banner.name}</span>
-        <span className="text-muted">. It’s yours to edit and run.</span>
+        <span className="text-muted">{banner.kind === 'imported' ? '. Check it over, then press Run.' : '. It’s yours to edit and run.'}</span>
       </span>
       {banner.canRestore && (
         <button onClick={restore} className="shrink-0 rounded-lg border border-line-strong px-2.5 py-1 text-[12px] hover:bg-raised">

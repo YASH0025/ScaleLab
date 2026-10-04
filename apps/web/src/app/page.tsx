@@ -38,6 +38,12 @@ export default function Home() {
               ▶ Try the e-commerce example
             </Link>
             <Link
+              href="/play?template=import"
+              className="rounded-xl border border-accent/60 bg-card px-5 py-3 text-[15px] font-semibold transition hover:bg-raised"
+            >
+              📦 Import your project
+            </Link>
+            <Link
               href="/play?template=microservices"
               className="rounded-xl border border-line-strong bg-card px-5 py-3 text-[15px] transition hover:bg-raised"
             >

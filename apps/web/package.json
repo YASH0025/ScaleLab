@@ -13,6 +13,7 @@
   "dependencies": {
     "@scalelab/catalog": "*",
     "@scalelab/engine": "*",
+    "@scalelab/importer": "*",
     "@scalelab/model": "*",
     "@scalelab/planner": "*",
     "@scalelab/templates": "*",

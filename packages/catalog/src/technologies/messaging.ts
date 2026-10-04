@@ -20,6 +20,17 @@ export const messagingTechnologies: TechnologyDefinition[] = [
     defaults: queueConfig({ publishLatency: logn(1.5, 6), maxBacklog: 100_000 }),
   }),
   tech({
+    id: 'redis-queue',
+    name: 'Redis job queue',
+    category: 'message-queue',
+    archetype: 'message-queue',
+    icon: 'redis',
+    brandColor: '#FF4438',
+    description: 'Jobs stored in Redis lists, as used by BullMQ, Celery and Sidekiq. Workers compete for jobs.',
+    tags: ['redis', 'jobs', 'bullmq', 'celery', 'sidekiq', 'queue'],
+    defaults: queueConfig({ publishLatency: logn(0.8, 3), maxBacklog: 1_000_000 }),
+  }),
+  tech({
     id: 'aws-sqs',
     name: 'AWS SQS',
     category: 'message-queue',

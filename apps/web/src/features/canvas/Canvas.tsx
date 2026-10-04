@@ -32,7 +32,14 @@ export function Canvas() {
   const selectedId = useUi((s) => s.selectedNodeId);
   const select = useUi((s) => s.select);
   const toast = useUi((s) => s.toast);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
+  const fitRequest = useUi((s) => s.fitRequest);
+  useEffect(() => {
+    if (fitRequest === 0) return;
+    // Wait a frame so freshly loaded nodes are measured first.
+    const t = setTimeout(() => void fitView({ padding: 0.25, maxZoom: 1, duration: 400 }), 60);
+    return () => clearTimeout(t);
+  }, [fitRequest, fitView]);
   const [wobbling, setWobbling] = useState(false);
 
   // Local copy of React Flow nodes so dragging is smooth; committed to the document on drop.

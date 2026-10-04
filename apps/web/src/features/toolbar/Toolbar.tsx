@@ -1,8 +1,9 @@
 'use client';
 
-import { microShop, shopSphere } from '@scalelab/templates';
+import { checkoutShop, microShop, shopSphere } from '@scalelab/templates';
 import { useState } from 'react';
 import { ShareButton } from '@/features/share/ShareButton';
+import { useJourneys } from '@/store/use-journeys';
 import { usePlan } from '@/store/use-plan';
 import { clearDesign, loadDesign, renameDesign } from '@/store/design-doc';
 import { useDesign } from '@/store/use-design';
@@ -133,6 +134,18 @@ export function Toolbar() {
               onClick={() => {
                 reset();
                 select(undefined);
+                loadDesign(checkoutShop());
+                setMenuOpen(false);
+                useJourneys.getState().show('list');
+              }}
+            >
+              Load checkout example
+            </button>
+            <button
+              className="w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-raised"
+              onClick={() => {
+                reset();
+                select(undefined);
                 clearDesign();
                 setMenuOpen(false);
               }}
@@ -163,7 +176,7 @@ export function Toolbar() {
           ▶ Resume
         </button>
       ) : (
-        <button onClick={run} className={primary}>
+        <button onClick={() => run()} className={primary}>
           ▶ Run
         </button>
       )}
@@ -192,6 +205,14 @@ export function Toolbar() {
         {trafficOpen && <TrafficPopover onClose={() => setTrafficOpen(false)} />}
       </div>
       <div className="mx-1 h-6 w-px bg-line" aria-hidden="true" />
+      <button onClick={() => useJourneys.getState().show('list')} className={btn} title="Send users through your system step by step">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <circle cx="5" cy="6" r="2" />
+          <circle cx="19" cy="18" r="2" />
+          <path d="M7 6h8a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h8" />
+        </svg>
+        Journeys
+      </button>
       <button onClick={() => usePlan.getState().show()} className={btn} title="Find the cheapest setup that meets your targets">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
           <path d="M3 3v18h18" />

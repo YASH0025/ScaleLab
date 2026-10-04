@@ -44,6 +44,12 @@ export default function Home() {
               Microservices + Kafka example
             </Link>
             <Link
+              href="/play?template=checkout"
+              className="rounded-xl border border-line-strong bg-card px-5 py-3 text-[15px] transition hover:bg-raised"
+            >
+              Checkout journey + Stripe
+            </Link>
+            <Link
               href="/play?template=blank"
               className="rounded-xl border border-line-strong bg-card px-5 py-3 text-[15px] transition hover:bg-raised"
             >

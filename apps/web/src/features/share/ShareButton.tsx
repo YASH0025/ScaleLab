@@ -25,12 +25,18 @@ export function ShareButton({ className }: { className: string }) {
   };
 
   const open = () => {
-    const { name, nodes, edges } = snapshot();
+    const { name, nodes, edges, journeys } = snapshot();
     if (nodes.length === 0) {
       toast('Add a few components before sharing.', 'error');
       return;
     }
-    const link = shareUrl(window.location.origin, { name, nodes, edges, traffic: useSim.getState().traffic });
+    const link = shareUrl(window.location.origin, {
+      name,
+      nodes,
+      edges,
+      ...(journeys.length > 0 ? { journeys } : {}),
+      traffic: useSim.getState().traffic,
+    });
     setUrl(link);
     void copy(link);
   };

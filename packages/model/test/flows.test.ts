@@ -3,6 +3,8 @@ import { deriveFlows, derivedMix, isWriteFlow, readFlowId, writeFlowId } from '.
 import type { ArchEdge, ArchNode, Archetype, FlowStep } from '../src/schemas';
 
 const ARCH: Record<string, Archetype> = {
+  stripe: 'external-api',
+  auth: 'auth-provider',
   web: 'client',
   lb: 'load-balancer',
   gw: 'gateway',
@@ -48,7 +50,7 @@ describe('deriveFlows: single service', () => {
     expect(read!.entryNodeId).toBe('lb');
     expect(read!.steps[0]).toEqual({ kind: 'call', nodeId: 'api', operation: 'process' });
     expect(read!.steps[1]).toMatchObject({ kind: 'cache-lookup', cacheNodeId: 'cache', writeBackOnMiss: true });
-    expect(write!.steps[1]).toEqual({ kind: 'call', nodeId: 'db', operation: 'write' });
+    expect(write!.steps[1]).toEqual({ kind: 'call', nodeId: 'db', operation: 'write', effect: 'saved to db' });
   });
 
   it('works without a load balancer or cache', () => {
@@ -136,7 +138,7 @@ describe('deriveFlows: queues and consumers', () => {
     const { flows, handlers, hints } = deriveFlows(g.nodes, g.edges, resolve);
     expect(hints).toEqual([]);
     const write = flows.find((f) => isWriteFlow(f.id))!;
-    expect(write.steps).toContainEqual({ kind: 'publish', nodeId: 'kafka' });
+    expect(write.steps).toContainEqual({ kind: 'publish', nodeId: 'kafka', effect: 'sent to kafka' });
     const read = flows.find((f) => !isWriteFlow(f.id))!;
     expect(read.steps.some((s) => s.kind === 'publish')).toBe(false);
     expect(handlers).toEqual([
@@ -146,7 +148,7 @@ describe('deriveFlows: queues and consumers', () => {
         consumerNodeId: 'worker',
         steps: [
           { kind: 'call', nodeId: 'worker', operation: 'process' },
-          { kind: 'call', nodeId: 'db2', operation: 'write' },
+          { kind: 'call', nodeId: 'db2', operation: 'write', effect: 'saved to db2' },
         ],
       },
     ]);
@@ -168,5 +170,31 @@ describe('deriveFlows: queues and consumers', () => {
     const g = graph(['web', 'api', 'mq', 'worker'], [['web', 'api'], ['api', 'mq'], ['mq', 'worker'], ['worker', 'mq']]);
     const { handlers } = deriveFlows(g.nodes, g.edges, resolve);
     expect(handlers[0]!.steps.some((s) => s.kind === 'publish')).toBe(false);
+  });
+});
+
+describe('deriveFlows: external services', () => {
+  it('calls external APIs after data, with a side effect on writes only', () => {
+    const g = graph(['web', 'orders', 'db', 'stripe', 'kafka'], [
+      ['web', 'orders'],
+      ['orders', 'db'],
+      ['orders', 'stripe'],
+      ['orders', 'kafka'],
+    ]);
+    const { flows } = deriveFlows(g.nodes, g.edges, resolve);
+    const write = flows.find((f) => isWriteFlow(f.id))!;
+    expect(write.steps.slice(1, 4)).toEqual([
+      { kind: 'call', nodeId: 'db', operation: 'write', effect: 'saved to db' },
+      { kind: 'call', nodeId: 'stripe', operation: 'write', effect: 'stripe call went through' },
+      { kind: 'publish', nodeId: 'kafka', effect: 'sent to kafka' },
+    ]);
+    const read = flows.find((f) => !isWriteFlow(f.id))!;
+    expect(read.steps).toContainEqual({ kind: 'call', nodeId: 'stripe', operation: 'read' });
+  });
+
+  it('gives a service that only calls an external API a write flow', () => {
+    const g = graph(['web', 'api', 'auth'], [['web', 'api'], ['api', 'auth']]);
+    const { flows } = deriveFlows(g.nodes, g.edges, resolve);
+    expect(flows.some((f) => f.id === writeFlowId('api'))).toBe(true);
   });
 });

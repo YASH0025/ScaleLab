@@ -5,6 +5,7 @@ import {
   type ArchetypeConfig,
   type Design,
   type Distribution,
+  type Journey,
   checkConnection,
   deriveFlows,
   derivedMix,
@@ -29,7 +30,13 @@ const INTERNAL_LATENCY: Distribution = { kind: 'lognormal', meanMs: 0.5, p99Ms: 
  * catalog defaults for every node, the first allowed protocol for every edge,
  * and flows derived from the graph.
  */
-export function buildDesign(name: string, description: string, specs: NodeSpec[], links: Array<[string, string]>): Design {
+export function buildDesign(
+  name: string,
+  description: string,
+  specs: NodeSpec[],
+  links: Array<[string, string]>,
+  extra: { journeys?: Journey[]; usersPerSec?: number } = {},
+): Design {
   const nodes: ArchNode[] = specs.map((spec) => {
     const tech = getTechnology(spec.tech);
     if (!tech) throw new Error(`Unknown technology "${spec.tech}".`);
@@ -58,6 +65,7 @@ export function buildDesign(name: string, description: string, specs: NodeSpec[]
     };
   });
   const { flows, handlers } = deriveFlows(nodes, edges, resolveArchetype);
+  const journeys = extra.journeys ?? [];
   return {
     schemaVersion: 1,
     meta: { name, description, createdAt: '2026-10-04T00:00:00.000Z' },
@@ -65,6 +73,7 @@ export function buildDesign(name: string, description: string, specs: NodeSpec[]
     edges,
     flows,
     handlers,
+    ...(journeys.length > 0 ? { journeys } : {}),
     workloads: [
       {
         id: 'ramp',
@@ -74,6 +83,19 @@ export function buildDesign(name: string, description: string, specs: NodeSpec[]
         mix: derivedMix(flows),
         seed: 42,
       },
+      ...(journeys.length > 0
+        ? [
+            {
+              id: 'journeys',
+              name: 'Journeys only',
+              durationSec: 60,
+              pattern: { kind: 'constant' as const, rps: 1 },
+              mix: [],
+              journeys: journeys.map((j) => ({ journeyId: j.id, usersPerSec: extra.usersPerSec ?? 20 })),
+              seed: 42,
+            },
+          ]
+        : []),
     ],
   };
 }

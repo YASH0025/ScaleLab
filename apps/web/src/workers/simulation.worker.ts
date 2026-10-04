@@ -37,7 +37,13 @@ function frame() {
     }
     if (finished) {
       const result = sim.result();
-      post({ type: 'done', totals: result.totals, nodes: result.nodes, warnings: result.warnings });
+      post({
+        type: 'done',
+        totals: result.totals,
+        nodes: result.nodes,
+        warnings: result.warnings,
+        ...(result.journeys ? { journeys: result.journeys } : {}),
+      });
       stop();
     }
   } catch (err) {

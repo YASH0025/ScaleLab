@@ -46,6 +46,15 @@ const BY_TECHNOLOGY: Record<string, Pricing> = {
   redpanda: { kind: 'cluster', hourlyUsd: HOURLY.ec2M6iLarge, nodes: 3, instanceClass: 'm6i.large (self-managed)' },
   rabbitmq: { kind: 'node', hourlyUsd: HOURLY.amazonMqM7gLarge, instanceClass: 'mq.m7g.large' },
   'aws-sqs': { kind: 'per-request', perMillionUsd: 0.4, requestsPerMessage: 3 },
+  stripe: { kind: 'third-party', provider: 'Stripe' },
+  paypal: { kind: 'third-party', provider: 'PayPal' },
+  razorpay: { kind: 'third-party', provider: 'Razorpay' },
+  twilio: { kind: 'third-party', provider: 'Twilio' },
+  sendgrid: { kind: 'third-party', provider: 'SendGrid' },
+  'openai-api': { kind: 'third-party', provider: 'OpenAI' },
+  'third-party-api': { kind: 'third-party', provider: 'the provider' },
+  auth0: { kind: 'third-party', provider: 'Auth0' },
+  clerk: { kind: 'third-party', provider: 'Clerk' },
 };
 
 const BY_ARCHETYPE: Partial<Record<Archetype, Pricing>> = {

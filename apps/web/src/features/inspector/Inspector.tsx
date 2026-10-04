@@ -142,6 +142,20 @@ function ConfigFields({ node }: { node: ArchNode }) {
           </p>
         </>
       );
+    case 'external':
+      return (
+        <>
+          <NumberField label="Response time" value={meanOf(c.latency)} min={1} step={10} suffix="ms" onChange={(v) => set({ ...c, latency: withMean(c.latency, v) })} />
+          <NumberField label="Errors" value={Math.round(c.errorRate * 1000) / 10} min={0} max={100} step={0.5} suffix="%" onChange={(v) => set({ ...c, errorRate: v / 100 })} />
+          <NumberField label="Slow, no reply" value={Math.round(c.timeoutRate * 1000) / 10} min={0} max={100} step={0.5} suffix="%" onChange={(v) => set({ ...c, timeoutRate: v / 100 })} />
+          <NumberField label="Caller waits" value={c.timeoutMs} min={10} step={500} suffix="ms" onChange={(v) => set({ ...c, timeoutMs: v })} />
+          <NumberField label="Rate limit" value={c.rateLimitRps} min={0} step={10} suffix="/s" onChange={(v) => set({ ...c, rateLimitRps: Math.round(v) })} />
+          <p className="mt-2 text-[11px] leading-relaxed text-faint">
+            Errors fail before anything happens. “Slow, no reply” means the work is done (the card is charged) but the caller gives up waiting. Rate
+            limit 0 means no limit.
+          </p>
+        </>
+      );
     case 'client':
       return <p className="text-[13px] leading-relaxed text-muted">Sends the traffic you set in the toolbar. Connect it to a load balancer or a backend.</p>;
     case 'generic':
@@ -220,7 +234,9 @@ function Failures({ node }: { node: ArchNode }) {
   const inject = useSim((s) => s.inject);
   const live = status === 'running' || status === 'paused';
   const c = node.config;
-  if (c.type !== 'compute' && c.type !== 'cache' && c.type !== 'relational-db' && c.type !== 'queue') return null;
+  if (c.type !== 'compute' && c.type !== 'cache' && c.type !== 'relational-db' && c.type !== 'queue' && c.type !== 'external') return null;
+  // Outside services are slow in seconds, not milliseconds; enough to pass most caller timeouts.
+  const extraMs = c.type === 'external' ? 2000 : 100;
   const btn = 'rounded-lg border px-2.5 py-1.5 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40';
 
   return (
@@ -247,17 +263,17 @@ function Failures({ node }: { node: ArchNode }) {
             onClick={() => inject({ nodeId: node.id, action: injected?.down ? 'up' : 'down' })}
             className={`${btn} ${injected?.down ? 'border-ok text-ok' : 'border-[#5a2a2e] text-bad-soft hover:bg-bad-bg'}`}
           >
-            {injected?.down ? 'Bring back up' : 'Take down'}
+            {injected?.down ? 'Bring back up' : c.type === 'external' ? 'Outage' : 'Take down'}
           </button>
         )}
         <button
           disabled={!live}
           onClick={() =>
-            inject({ nodeId: node.id, action: 'latency', extraLatencyMs: injected?.extraLatencyMs ? 0 : 100 })
+            inject({ nodeId: node.id, action: 'latency', extraLatencyMs: injected?.extraLatencyMs ? 0 : extraMs })
           }
           className={`${btn} border-line-strong hover:bg-raised`}
         >
-          {injected?.extraLatencyMs ? 'Remove latency' : '+100 ms latency'}
+          {injected?.extraLatencyMs ? 'Remove latency' : extraMs >= 1000 ? `+${extraMs / 1000} s latency` : `+${extraMs} ms latency`}
         </button>
       </div>
     </Section>

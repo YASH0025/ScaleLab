@@ -209,5 +209,12 @@ export function healthOfSample(s: EngineNodeSample | undefined, archetype: Arche
     if (lag >= LAG_WARM_MS || s.utilization >= 0.7) return 'warm';
     return 'ok';
   }
+  if (s.failedPerSec !== undefined) {
+    // Outside services: judged by the share of calls that fail, and by how close they are to the rate limit.
+    const failShare = s.servedPerSec > 0 ? s.failedPerSec / s.servedPerSec : 0;
+    if (failShare >= 0.1 || s.utilization >= HOT) return 'hot';
+    if (failShare >= 0.02 || s.utilization >= 0.7) return 'warm';
+    return 'ok';
+  }
   return healthOf(s.utilization, s.up);
 }

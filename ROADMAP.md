@@ -14,15 +14,9 @@ All numbers ScaleLab shows are modeled estimates, never measurements of a real s
 - **Share by link**: a whole design in one URL, no account needed.
 - **1. Microservices and async queues**: services calling services; RabbitMQ, SQS, Kafka and Redpanda with consumer lag, partitions, retries and dead letters.
 - **2. Capacity planner and cost estimator**: monthly cost from AWS list prices, and a planner that finds the cheapest setup meeting latency, error, lag and headroom targets, then applies it in one click. Later: GCP and Azure prices, editable prices, reserved and spot discounts.
+- **7. Business journeys and failure paths**: outside services (Stripe, PayPal, Razorpay, Twilio, SendGrid, OpenAI, Auth0, Clerk) with response time, errors, "slow, no reply" timeouts and rate limits. Journeys send users through steps in order with retries and idempotency keys, and show where they drop off, which steps failed halfway ("charged, but no order") and which work happened twice ("charged twice"), each with a fix. Journeys export as a k6 load test. Later: branches (payment failed → retry page), bad-data responses, and Playwright and Postman exports.
 
 ## Next
-
-### 7. Business journeys and failure paths
-- Draw a user journey across services, like login → add to cart → payment → order confirmation, with branches such as payment succeeded or failed.
-- Simulated external services (Stripe, Twilio, auth providers) with configurable latency, error rates, timeouts and bad responses.
-- Response-level failure injection: "returns 500", "returns invalid data", "times out after the charge went through".
-- Journey results that catch partial failures, such as "0.8% of orders are created without payment when Stripe is slow", and point to fixes like retries, idempotency keys or compensation steps.
-- Export journeys as real tests (Playwright, k6, Postman collections) to run against the actual application.
 
 ### 3. Infrastructure import
 - Turn docker-compose, Kubernetes YAML or Terraform files into a ScaleLab design automatically.
@@ -42,7 +36,7 @@ All numbers ScaleLab shows are modeled estimates, never measurements of a real s
 
 1. ~~Microservices and async queues~~
 2. ~~Capacity planner and cost estimator~~
-3. Business journeys and failure paths (point 7)
+3. ~~Business journeys and failure paths (point 7)~~
 4. Infrastructure import
 5. Trace calibration
 6. Architecture as code and CI check

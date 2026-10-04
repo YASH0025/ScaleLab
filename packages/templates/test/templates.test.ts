@@ -1,7 +1,7 @@
 import { resolveArchetype } from '@scalelab/catalog';
 import { validateDesign } from '@scalelab/model';
 import { describe, expect, it } from 'vitest';
-import { microShop, shopSphere } from '../src';
+import { checkoutShop, microShop, shopSphere } from '../src';
 
 describe('ShopSphere template', () => {
   it('is a valid design with the cache', () => {
@@ -47,7 +47,7 @@ describe('ShopSphere microservices template', () => {
     expect(d.flows.map((f) => f.id).sort()).toEqual(['read:catalog', 'read:orders', 'write:catalog', 'write:orders']);
     expect(d.handlers?.map((h) => h.consumerNodeId).sort()).toEqual(['analytics', 'email']);
     const ordersWrite = d.flows.find((f) => f.id === 'write:orders')!;
-    expect(ordersWrite.steps).toContainEqual({ kind: 'publish', nodeId: 'kafka' });
+    expect(ordersWrite.steps).toContainEqual({ kind: 'publish', nodeId: 'kafka', effect: 'sent to Order events' });
     expect(ordersWrite.steps.some((s) => s.kind === 'service-call' && s.nodeId === 'inventory')).toBe(true);
   });
 
@@ -57,5 +57,29 @@ describe('ShopSphere microservices template', () => {
     const email = d.nodes.find((n) => n.id === 'email')!.config;
     expect(kafka.type === 'queue' && kafka.partitions).toBe(24);
     expect(email.type === 'compute' && email.instances).toBe(6);
+  });
+});
+
+describe('ShopSphere checkout template', () => {
+  it('is a valid design with a valid journey', () => {
+    const d = checkoutShop();
+    expect(validateDesign(d, resolveArchetype).filter((i) => i.severity === 'error')).toEqual([]);
+    expect(d.journeys?.[0]?.steps.map((s) => s.name)).toEqual(['Log in', 'Browse products', 'Add to cart', 'Pay', 'See confirmation']);
+  });
+
+  it('charges the card before saving the order', () => {
+    const d = checkoutShop();
+    const pay = d.flows.find((f) => f.id === 'write:orders')!;
+    const effects = JSON.stringify(pay.steps);
+    expect(effects.indexOf('Stripe call went through')).toBeLessThan(effects.indexOf('saved to Orders DB'));
+  });
+
+  it('applies options to the Pay step and Stripe', () => {
+    const d = checkoutShop({ payRetries: 3, idempotentPay: true, stripeTimeoutRate: 0.05 });
+    const step = d.journeys![0]!.steps.find((s) => s.id === 'pay')!;
+    expect(step.retries).toBe(3);
+    expect(step.idempotent).toBe(true);
+    const stripe = d.nodes.find((n) => n.id === 'stripe')!.config;
+    expect(stripe.type === 'external' && stripe.timeoutRate).toBe(0.05);
   });
 });

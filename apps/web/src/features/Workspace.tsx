@@ -1,10 +1,11 @@
 'use client';
 
-import { microShop, shopSphere } from '@scalelab/templates';
+import { checkoutShop, microShop, shopSphere } from '@scalelab/templates';
 import { ReactFlowProvider } from '@xyflow/react';
 import { useEffect } from 'react';
 import { Canvas } from '@/features/canvas/Canvas';
 import { Inspector } from '@/features/inspector/Inspector';
+import { JourneysPanel } from '@/features/journeys/JourneysPanel';
 import { LibraryPanel } from '@/features/library/LibraryPanel';
 import { MetricsDrawer } from '@/features/metrics/MetricsDrawer';
 import { PlanPanel } from '@/features/plan/PlanPanel';
@@ -15,6 +16,7 @@ import { clearBackup, saveBackup } from '@/lib/backup';
 import { decodeDesign, readHash } from '@/lib/share';
 import { clearDesign, isEmpty, loadDesign, snapshot, startPersistence } from '@/store/design-doc';
 import { useDesign } from '@/store/use-design';
+import { useJourneys } from '@/store/use-journeys';
 import { useSim } from '@/store/use-sim';
 import { useUi } from '@/store/use-ui';
 
@@ -38,7 +40,12 @@ function openSharedLink(): boolean {
   if (!canRestore) clearBackup();
   useSim.getState().reset();
   ui.select(undefined);
-  loadDesign({ nodes: result.design.nodes, edges: result.design.edges, meta: { name: result.design.name } });
+  loadDesign({
+    nodes: result.design.nodes,
+    edges: result.design.edges,
+    ...(result.design.journeys ? { journeys: result.design.journeys } : {}),
+    meta: { name: result.design.name },
+  });
   if (result.design.traffic) useSim.getState().setTraffic(result.design.traffic);
   ui.setSharedBanner({ name: result.design.name, canRestore });
   return true;
@@ -54,6 +61,10 @@ export function Workspace({ template }: { template: string | undefined }) {
       if (!openSharedLink()) {
         if (template === 'shopsphere' || (template === undefined && isEmpty())) loadDesign(shopSphere());
         else if (template === 'microservices') loadDesign(microShop());
+        else if (template === 'checkout') {
+          loadDesign(checkoutShop());
+          useJourneys.getState().show('list');
+        }
         else if (template === 'blank') clearDesign();
         if (template) window.history.replaceState(null, '', '/play');
       }
@@ -87,6 +98,7 @@ export function Workspace({ template }: { template: string | undefined }) {
       </div>
       <MetricsDrawer />
       <PlanPanel />
+      <JourneysPanel />
       <Toasts />
       <Celebration />
     </div>

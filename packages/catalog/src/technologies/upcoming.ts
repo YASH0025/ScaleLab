@@ -52,17 +52,6 @@ export const upcomingTechnologies: TechnologyDefinition[] = [
     defaults: genericConfig({ getMs: 30, putMs: 50 }),
   }),
   tech({
-    id: 'stripe',
-    name: 'Stripe',
-    category: 'external',
-    archetype: 'external-api',
-    icon: 'stripe',
-    brandColor: '#635BFF',
-    description: 'Third-party payments API.',
-    tags: ['payments', 'third-party'],
-    defaults: genericConfig({ latencyMs: 300, errorRate: 0.005 }),
-  }),
-  tech({
     id: 'kubernetes-cluster',
     name: 'Kubernetes cluster',
     category: 'infrastructure',

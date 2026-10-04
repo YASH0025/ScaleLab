@@ -96,6 +96,8 @@ function lineFor(node: ArchNode, pricing: Pricing | undefined, usage: Usage): Om
         unpriced: false,
       };
     }
+    case 'third-party':
+      return { monthlyUsd: 0, basis: `Billed by ${pricing.provider} per use, not included`, usageBased: true, unpriced: false };
     case 'per-request': {
       const perSec = usage.messagesPerSec?.[node.id];
       const requests = (perSec ?? 0) * SECONDS_PER_MONTH * pricing.requestsPerMessage;

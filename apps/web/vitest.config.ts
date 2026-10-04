@@ -7,5 +7,7 @@ export default defineConfig({
   },
   test: {
     include: ['test/**/*.test.ts'],
+    // Some tests run full simulations, which are slow when every package tests at once.
+    testTimeout: 30_000,
   },
 });

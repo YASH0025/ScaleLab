@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { findBottleneck } from '@/lib/findings';
+import { findBottleneck, findSustainedBottleneck } from '@/lib/findings';
 import { useDesign } from '@/store/use-design';
 import { useSim } from '@/store/use-sim';
 import { Sparkline } from './Sparkline';
@@ -54,12 +54,9 @@ export function MetricsDrawer() {
   );
 
   const bottleneck = findBottleneck(latest, nodes, edges);
-  const worst = useMemo(() => {
-    let found: ReturnType<typeof findBottleneck>;
-    for (const s of samples) found = findBottleneck(s, nodes, edges) ?? found;
-    return found;
-  }, [samples, nodes, edges]);
-  const shown = bottleneck ?? (status === 'done' ? worst : undefined);
+  const sustained = useMemo(() => (status === 'done' ? findSustainedBottleneck(samples, nodes, edges) : undefined), [status, samples, nodes, edges]);
+  // While running, show what's under pressure right now; once finished, only what lasted.
+  const shown = status === 'done' ? sustained : bottleneck;
 
   if (status === 'idle') {
     return (

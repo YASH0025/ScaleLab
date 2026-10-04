@@ -7,6 +7,7 @@ import { Canvas } from '@/features/canvas/Canvas';
 import { Inspector } from '@/features/inspector/Inspector';
 import { LibraryPanel } from '@/features/library/LibraryPanel';
 import { MetricsDrawer } from '@/features/metrics/MetricsDrawer';
+import { PlanPanel } from '@/features/plan/PlanPanel';
 import { SharedBanner } from '@/features/share/SharedBanner';
 import { Celebration, Toasts } from '@/features/toolbar/Overlays';
 import { Toolbar } from '@/features/toolbar/Toolbar';
@@ -85,6 +86,7 @@ export function Workspace({ template }: { template: string | undefined }) {
         <Inspector />
       </div>
       <MetricsDrawer />
+      <PlanPanel />
       <Toasts />
       <Celebration />
     </div>

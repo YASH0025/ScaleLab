@@ -16,6 +16,7 @@ Early development. This repository currently contains the foundation and the sim
 | `packages/model` | Shared architecture model: types and Zod schemas for nodes, edges, libraries, API flows, workloads and results; connection rules; design validation |
 | `packages/catalog` | Technologies and libraries as data, with realistic default settings |
 | `packages/engine` | Discrete-event simulation engine: traffic, queues, failures, retries, metrics and traces. Pure TypeScript, runs in a Web Worker or Node |
+| `packages/planner` | Cost estimates from list prices, and a capacity planner that finds the cheapest setup meeting your targets |
 | `packages/templates` | Ready-to-run architectures: ShopSphere (e-commerce) and ShopSphere microservices (services + Kafka + workers) |
 | `packages/config` | Shared TypeScript configuration |
 
@@ -60,6 +61,12 @@ The engine simulates `client`, `load-balancer`, `compute-service`, `cache`, `rel
 - **Failure behavior**: a full backlog rejects publishes; a broker outage fails the requests that publish; a consumer outage builds a backlog that drains when it returns; messages that keep failing are retried, then dead-lettered.
 
 Flows are derived from the canvas: every service behind the entry point gets traffic, calls follow the arrows between services, and writes publish to the queues a service is connected to.
+
+## Capacity planning and cost
+
+- **Cost estimate**: every component has a list-price estimate (AWS us-east-1, on-demand, checked October 2026): backends per instance, databases sized by concurrent queries plus read replicas, caches, Kafka clusters, load balancer capacity units, and SQS per message. Storage, data transfer, frontend hosting and discounts are not included.
+- **Plan capacity**: set a traffic level and targets (p95 latency, error rate, queue lag, and headroom: how busy any component may be). The planner simulates candidate setups the way an engineer would (scale the component closest to the root cause, keep the change that helps most per dollar) and then removes anything that isn't needed. It recommends the cheapest setup that meets every target, and applies it to the canvas in one click.
+- It changes capacity only (instances, read replicas, database size, partitions). When only faster code or a cache would help, it says so instead.
 
 ## Deploy to Vercel
 

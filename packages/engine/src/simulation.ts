@@ -6,7 +6,9 @@ import type {
   ComputeConfig,
   Design,
   Distribution,
+  ExternalConfig,
   FlowStep,
+  Journey,
   LibraryEffect,
   LoadBalancerConfig,
   MessageHandler,
@@ -71,6 +73,8 @@ export interface EngineNodeSample extends NodeMetricsSample {
   lagMs?: number;
   /** Queues and streams: messages given up on after repeated failures, so far. */
   deadLettered?: number;
+  /** External services: calls that failed this second (errors, timeouts, rate limits). */
+  failedPerSec?: number;
 }
 
 export interface EngineMetricsSample extends MetricsSample {
@@ -115,11 +119,44 @@ export interface SimulationTotals {
   messagesDeadLettered: number;
 }
 
+export interface JourneyStepStats {
+  stepId: string;
+  name: string;
+  /** Users who got to this step. */
+  reached: number;
+  succeeded: number;
+  /** Users who gave up here after every retry failed. */
+  failed: number;
+  /** Attempts beyond each user's first. */
+  retries: number;
+  /** Failed steps that still changed something, grouped by what happened. */
+  partial: Array<{ effects: string[]; count: number }>;
+  /** Steps where a side effect happened more than once (for example, a double charge). */
+  duplicates: Array<{ effect: string; count: number }>;
+}
+
+export interface JourneyStats {
+  journeyId: string;
+  name: string;
+  started: number;
+  completed: number;
+  /** Users who stopped at a failed step. */
+  abandoned: number;
+  /** Still in progress when the run ended. */
+  unfinished: number;
+  /** Time to complete the whole journey, for users who finished. */
+  p50Ms: number;
+  p95Ms: number;
+  steps: JourneyStepStats[];
+}
+
 export interface SimulationResult {
   timeline: EngineMetricsSample[];
   totals: SimulationTotals;
   nodes: NodeSummary[];
   traces: RequestTrace[];
+  /** Present when the workload ran journeys. */
+  journeys?: JourneyStats[];
   warnings: string[];
   eventsProcessed: number;
   simulatedMs: number;
@@ -141,7 +178,22 @@ type RuntimeNode =
   | (Base & { kind: 'cache'; config: CacheConfig; pool: Resource; hits: number; misses: number })
   | (Base & { kind: 'db'; config: RelationalDbConfig; primary: Resource; replicas: Resource[] })
   | (Base & { kind: 'queue'; config: QueueConfig; groups: QueueGroup[]; published: number; deadLettered: number })
+  | (Base & { kind: 'external'; config: ExternalConfig; windowSec: number; windowCalls: number; calls: number; failed: number })
   | (Base & { kind: 'passthrough' });
+
+/** Pause between a user's steps, and between their retries. */
+const THINK_TIME_MS = 1000;
+const RETRY_BACKOFF_MS = 500;
+
+interface PreparedJourney {
+  journey: Journey;
+  usersPerSec: number;
+  flows: PreparedFlow[];
+  stats: JourneyStats;
+  stepPartials: Array<Map<string, number>>;
+  stepDuplicates: Array<Map<string, number>>;
+  durations: number[];
+}
 
 interface Message {
   /** When it was first published; lag is measured from here, even after retries. */
@@ -190,6 +242,10 @@ interface Req {
   spans: TraceSpan[];
   /** Set when this is a consumer processing a message, not a user request. */
   job?: { group: QueueGroup; message: Message };
+  /** Side effects that happened while serving this request, across retries. */
+  effects: string[];
+  /** Called when the request finishes; used by journeys. */
+  onDone?: (ok: boolean, effects: string[]) => void;
 }
 
 interface Attempt {
@@ -257,6 +313,9 @@ export class Simulation implements Clock {
     { utilSum: number; utilPeak: number; maxQueue: number; waitSum: number; waitCount: number; served: number; samples: number; maxLagMs: number }
   >();
   private readonly groups: QueueGroup[] = [];
+  private readonly journeyRng: Rng;
+  private readonly journeys: PreparedJourney[] = [];
+  private activeSessions = 0;
   private messagesPublished = 0;
   private messagesConsumed = 0;
   private messagesDeadLettered = 0;
@@ -280,6 +339,7 @@ export class Simulation implements Clock {
     };
     this.arrivalRng = new Rng(workload.seed);
     this.serviceRng = new Rng((workload.seed ^ 0x5bd1e995) >>> 0);
+    this.journeyRng = new Rng((workload.seed ^ 0x2c1b3c6d) >>> 0);
     this.durationMs = workload.durationSec * 1000;
     this.endMs = this.durationMs + this.options.drainSec * 1000;
     this.peakRps = peakRate(workload.pattern);
@@ -302,11 +362,13 @@ export class Simulation implements Clock {
     }
     this.totalWeight = this.flows.reduce((sum, f) => sum + f.weight, 0);
     this.buildGroups(design.handlers ?? []);
+    this.buildJourneys(design, workload, flowsById);
 
     for (const change of options.changes ?? []) {
       this.events.push(change.atSec * 1000, () => this.applyChange(change));
     }
-    if (this.peakRps > 0) this.scheduleNextArrival();
+    if (this.peakRps > 0 && this.totalWeight > 0) this.scheduleNextArrival();
+    for (const pj of this.journeys) this.scheduleNextUser(pj);
     this.events.push(1000, () => this.sampleSecond());
   }
 
@@ -396,6 +458,7 @@ export class Simulation implements Clock {
         ...(this.nodes.get(nodeId)?.kind === 'queue' ? { maxLagMs: round(a.maxLagMs) } : {}),
       })),
       traces: this.traces,
+      ...(this.journeys.length > 0 ? { journeys: this.journeys.map((pj) => this.journeyStats(pj)) } : {}),
       warnings: [...this.warnings],
       eventsProcessed: this.eventsProcessed,
       simulatedMs: this.clock,
@@ -451,6 +514,8 @@ export class Simulation implements Clock {
         };
       case 'queue':
         return { ...base, kind: 'queue', config: c, groups: [], published: 0, deadLettered: 0 };
+      case 'external':
+        return { ...base, kind: 'external', config: c, windowSec: -1, windowCalls: 0, calls: 0, failed: 0 };
       case 'generic':
         return { ...base, kind: 'passthrough' };
     }
@@ -560,7 +625,7 @@ export class Simulation implements Clock {
 
   // ── Requests ───────────────────────────────────────────────
 
-  private startRequest(flow: PreparedFlow): void {
+  private startRequest(flow: PreparedFlow, onDone?: Req['onDone']): void {
     const id = this.nextRequestId++;
     const req: Req = {
       id,
@@ -569,6 +634,8 @@ export class Simulation implements Clock {
       attempt: 0,
       traced: id % this.options.traceEvery === 0 && this.traces.length < this.options.maxTraces,
       spans: [],
+      effects: [],
+      ...(onDone ? { onDone } : {}),
     };
     this.totals.arrivals++;
     this.bucket(this.clock).arrivals++;
@@ -637,7 +704,7 @@ export class Simulation implements Clock {
         att.httpStatus = step.status;
         return next();
       case 'call':
-        return this.call(att, step.nodeId, step.operation, next);
+        return this.call(att, step.nodeId, step.operation, next, step.effect);
       case 'service-call':
         return this.serviceCall(att, step, next);
       case 'cache-lookup':
@@ -653,7 +720,7 @@ export class Simulation implements Clock {
         return;
       }
       case 'publish':
-        return this.publish(att, step.nodeId, next);
+        return this.publish(att, step.nodeId, next, step.effect);
     }
   }
 
@@ -713,7 +780,7 @@ export class Simulation implements Clock {
    * Hands a message to a queue or stream. The producer waits only for the broker's
    * acknowledgement, never for consumers. A full backlog pushes back by rejecting.
    */
-  private publish(att: Attempt, queueId: string, next: () => void): void {
+  private publish(att: Attempt, queueId: string, next: () => void, effect?: string): void {
     const node = this.nodes.get(queueId)!;
     const from = att.location;
     if (node.kind !== 'queue') {
@@ -734,6 +801,7 @@ export class Simulation implements Clock {
       }
       node.published++;
       this.messagesPublished++;
+      if (effect) att.req.effects.push(effect);
       this.schedule(ackMs + this.hopLatency(queueId, from), () => this.continueIfAlive(att, next));
     });
   }
@@ -778,6 +846,7 @@ export class Simulation implements Clock {
       traced: false,
       spans: [],
       job: { group, message },
+      effects: [],
     };
     const att: Attempt = {
       req,
@@ -812,7 +881,7 @@ export class Simulation implements Clock {
     this.dispatch(group);
   }
 
-  private call(att: Attempt, nodeId: string, operation: 'read' | 'write' | 'process', next: () => void): void {
+  private call(att: Attempt, nodeId: string, operation: 'read' | 'write' | 'process', next: () => void, effect?: string): void {
     const node = this.nodes.get(nodeId)!;
     switch (node.kind) {
       case 'compute':
@@ -829,8 +898,10 @@ export class Simulation implements Clock {
       case 'db': {
         const target = operation === 'write' ? node.primary : this.pickReadReplica(node);
         const dist = operation === 'write' ? node.config.writeQuery : node.config.readQuery;
-        return this.remoteOp(att, node, target, dist, next, (reason) => this.failFromAcquire(att, reason, nodeId));
+        return this.remoteOp(att, node, target, dist, next, (reason) => this.failFromAcquire(att, reason, nodeId), operation === 'write' ? effect : undefined);
       }
+      case 'external':
+        return this.externalCall(att, node, operation, next, effect);
       case 'passthrough': {
         this.warnings.add(`"${node.node.label}" is not simulated yet; it only adds network latency.`);
         const lat = this.hopLatency(att.location, nodeId) * 2;
@@ -880,6 +951,195 @@ export class Simulation implements Clock {
     );
   }
 
+  /**
+   * A call to a third-party service. It can be down, rate-limit you (429), fail (no side
+   * effect), or do the work and then not reply in time: the worst case, because the caller
+   * sees a failure while the side effect (a charge, an email) already happened.
+   */
+  private externalCall(
+    att: Attempt,
+    node: Extract<RuntimeNode, { kind: 'external' }>,
+    operation: 'read' | 'write' | 'process',
+    next: () => void,
+    effect?: string,
+  ): void {
+    const from = att.location;
+    const id = node.node.id;
+    const c = node.config;
+    this.schedule(this.hopLatency(from, id), () => {
+      if (att.dead) return;
+      node.calls++;
+      if (!node.up) {
+        node.failed++;
+        return this.fail(att, 'error', 503, id);
+      }
+      if (c.rateLimitRps > 0) {
+        const sec = Math.floor(this.clock / 1000);
+        if (sec !== node.windowSec) {
+          node.windowSec = sec;
+          node.windowCalls = 0;
+        }
+        if (node.windowCalls >= c.rateLimitRps) {
+          node.failed++;
+          this.span(att, id, 0, 0, 'rejected');
+          return this.fail(att, 'rejected', 429, id);
+        }
+        node.windowCalls++;
+      }
+      const latency = sample(this.serviceRng, c.latency) + node.extraLatencyMs;
+      const roll = this.serviceRng.next();
+      if (roll < c.errorRate) {
+        const wait = Math.min(latency, c.timeoutMs);
+        this.span(att, id, 0, wait, 'failed');
+        return this.schedule(wait, () => {
+          node.failed++;
+          if (!att.dead) this.fail(att, 'error', 502, id);
+        });
+      }
+      // The provider received the call and does the work.
+      if (effect && operation === 'write') att.req.effects.push(effect);
+      if (roll < c.errorRate + c.timeoutRate || latency > c.timeoutMs) {
+        this.span(att, id, 0, c.timeoutMs, 'timeout');
+        return this.schedule(c.timeoutMs, () => {
+          node.failed++;
+          if (!att.dead) this.fail(att, 'timeout', 504, id);
+        });
+      }
+      this.span(att, id, 0, latency, 'complete');
+      this.schedule(latency, () => {
+        if (att.dead) return;
+        this.schedule(this.hopLatency(id, from), () => this.continueIfAlive(att, next));
+      });
+    });
+  }
+
+  // ── Journeys ───────────────────────────────────────────────
+
+  private buildJourneys(design: Design, workload: Workload, flowsById: Map<string, ApiFlow>): void {
+    const byId = new Map((design.journeys ?? []).map((j) => [j.id, j]));
+    for (const entry of workload.journeys ?? []) {
+      const journey = byId.get(entry.journeyId);
+      if (!journey) throw new Error(`Workload "${workload.name}" runs unknown journey "${entry.journeyId}".`);
+      const flows = journey.steps.map((step) => {
+        const flowId = `${step.operation}:${step.serviceNodeId}`;
+        const flow = flowsById.get(flowId);
+        if (!flow) {
+          throw new Error(
+            `Journey "${journey.name}", step "${step.name}": "${this.nodes.get(step.serviceNodeId)?.node.label ?? step.serviceNodeId}" has no ${step.operation} path. Is it connected to the client and to what it ${step.operation === 'write' ? 'writes to' : 'reads from'}?`,
+          );
+        }
+        this.assertNodes(flow);
+        return { flow, weight: 0, clientId: this.findClient(flow.entryNodeId), firstCompute: this.firstCompute(flow) };
+      });
+      this.journeys.push({
+        journey,
+        usersPerSec: entry.usersPerSec,
+        flows,
+        stats: {
+          journeyId: journey.id,
+          name: journey.name,
+          started: 0,
+          completed: 0,
+          abandoned: 0,
+          unfinished: 0,
+          p50Ms: 0,
+          p95Ms: 0,
+          steps: journey.steps.map((s) => ({ stepId: s.id, name: s.name, reached: 0, succeeded: 0, failed: 0, retries: 0, partial: [], duplicates: [] })),
+        },
+        stepPartials: journey.steps.map(() => new Map()),
+        stepDuplicates: journey.steps.map(() => new Map()),
+        durations: [],
+      });
+    }
+  }
+
+  /** Users start journeys as a Poisson stream at a steady rate. */
+  private scheduleNextUser(pj: PreparedJourney): void {
+    const at = this.clock + this.journeyRng.exponential(1000 / pj.usersPerSec);
+    if (at >= this.durationMs) return;
+    this.events.push(at, () => {
+      this.startSession(pj);
+      this.scheduleNextUser(pj);
+    });
+  }
+
+  private startSession(pj: PreparedJourney): void {
+    pj.stats.started++;
+    this.activeSessions++;
+    this.runJourneyStep(pj, 0, this.clock);
+  }
+
+  /**
+   * One user's step: send the request, retry on failure, then decide. Side effects from
+   * every attempt count, because they really happened. With an idempotency key, a repeated
+   * attempt doesn't apply the same side effect twice.
+   */
+  private runJourneyStep(pj: PreparedJourney, index: number, startedAt: number): void {
+    const step = pj.journey.steps[index]!;
+    const stats = pj.stats.steps[index]!;
+    stats.reached++;
+    const happened = new Map<string, number>();
+    let attemptsLeft = step.retries + 1;
+
+    const settle = (ok: boolean) => {
+      for (const [effect, count] of happened) {
+        if (count > 1) pj.stepDuplicates[index]!.set(effect, (pj.stepDuplicates[index]!.get(effect) ?? 0) + 1);
+      }
+      if (ok) {
+        stats.succeeded++;
+        if (index + 1 < pj.journey.steps.length) {
+          this.schedule(THINK_TIME_MS, () => this.runJourneyStep(pj, index + 1, startedAt));
+        } else {
+          pj.stats.completed++;
+          pj.durations.push(this.clock - startedAt);
+          this.activeSessions--;
+        }
+        return;
+      }
+      stats.failed++;
+      if (happened.size > 0) {
+        const key = [...happened.keys()].join('\u0000');
+        pj.stepPartials[index]!.set(key, (pj.stepPartials[index]!.get(key) ?? 0) + 1);
+      }
+      pj.stats.abandoned++;
+      this.activeSessions--;
+    };
+
+    const attempt = () => {
+      attemptsLeft--;
+      this.startRequest(pj.flows[index]!, (ok, effects) => {
+        for (const effect of effects) {
+          if (step.idempotent && happened.has(effect)) continue;
+          happened.set(effect, (happened.get(effect) ?? 0) + 1);
+        }
+        if (ok) return settle(true);
+        if (attemptsLeft > 0) {
+          stats.retries++;
+          return this.schedule(RETRY_BACKOFF_MS, attempt);
+        }
+        settle(false);
+      });
+    };
+    attempt();
+  }
+
+  private journeyStats(pj: PreparedJourney): JourneyStats {
+    const latency = summarize(pj.durations);
+    return {
+      ...pj.stats,
+      unfinished: pj.stats.started - pj.stats.completed - pj.stats.abandoned,
+      p50Ms: round(latency.p50),
+      p95Ms: round(latency.p95),
+      steps: pj.stats.steps.map((s, i) => ({
+        ...s,
+        partial: [...pj.stepPartials[i]!.entries()]
+          .map(([key, count]) => ({ effects: key.split('\u0000'), count }))
+          .sort((a, b) => b.count - a.count),
+        duplicates: [...pj.stepDuplicates[i]!.entries()].map(([effect, count]) => ({ effect, count })).sort((a, b) => b.count - a.count),
+      })),
+    };
+  }
+
   /** Ensures the attempt holds a worker on a backend, moving there over the network. */
   private touch(att: Attempt, nodeId: string, cont: () => void): void {
     if (att.held.has(nodeId)) return cont();
@@ -916,6 +1176,7 @@ export class Simulation implements Clock {
     dist: Distribution,
     next: () => void,
     onFail: (reason: AcquireFailure) => void,
+    effect?: string,
   ): void {
     const from = att.location;
     const nodeId = node.node.id;
@@ -934,6 +1195,8 @@ export class Simulation implements Clock {
               return this.fail(att, 'error', 502, resource.id);
             }
             resource.release(lease);
+            // The write landed, even if the request fails later.
+            if (effect) att.req.effects.push(effect);
             if (att.dead) return;
             this.schedule(this.hopLatency(nodeId, from), () => this.continueIfAlive(att, next));
           });
@@ -1051,6 +1314,7 @@ export class Simulation implements Clock {
       bucket.latencies.push(latency);
       this.successLatencies.push(latency);
     }
+    req.onDone?.(status === 'ok' || status === 'fallback', req.effects);
     if (req.traced) {
       this.traces.push({
         requestId: `r${req.id}`,
@@ -1112,6 +1376,30 @@ export class Simulation implements Clock {
   }
 
   // ── Metrics ────────────────────────────────────────────────
+
+  /** Calls and failures per second for a third-party service; utilization is rate-limit usage. */
+  private sampleExternal(node: Extract<RuntimeNode, { kind: 'external' }>): EngineNodeSample {
+    const limit = node.config.rateLimitRps;
+    const utilization = limit > 0 ? Math.min(1, node.calls / limit) : 0;
+    const out: EngineNodeSample = {
+      nodeId: node.node.id,
+      utilization: round(utilization, 3),
+      queueLength: 0,
+      avgWaitMs: 0,
+      servedPerSec: node.calls,
+      up: node.up,
+      failedPerSec: node.failed,
+    };
+    const agg = this.nodeAgg.get(node.node.id) ?? emptyAgg();
+    agg.utilSum += utilization;
+    agg.utilPeak = Math.max(agg.utilPeak, utilization);
+    agg.served += node.calls;
+    agg.samples++;
+    this.nodeAgg.set(node.node.id, agg);
+    node.calls = 0;
+    node.failed = 0;
+    return out;
+  }
 
   /**
    * Backlog, lag and throughput of a queue. With fan-out, the slowest consumer group
@@ -1175,6 +1463,10 @@ export class Simulation implements Clock {
     for (const node of this.nodes.values()) {
       if (node.kind === 'queue') {
         nodes.push(this.sampleQueue(node));
+        continue;
+      }
+      if (node.kind === 'external') {
+        nodes.push(this.sampleExternal(node));
         continue;
       }
       const resources = this.resourcesOf(node);
@@ -1245,7 +1537,7 @@ export class Simulation implements Clock {
 
     const trafficOver = this.clock >= this.durationMs;
     const messagesPending = this.groups.some((g) => g.inflight > 0 || g.buffer.length > g.head);
-    if (!trafficOver || this.inFlight > 0 || messagesPending) {
+    if (!trafficOver || this.inFlight > 0 || messagesPending || this.activeSessions > 0) {
       if (this.clock + 1000 <= this.endMs) this.events.push(this.clock + 1000, () => this.sampleSecond());
     }
   }

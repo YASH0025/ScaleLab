@@ -1,8 +1,11 @@
 'use client';
 
 import { useMemo } from 'react';
+import type { JourneyStats } from '@scalelab/engine';
 import { findBottleneck, findSustainedBottleneck } from '@/lib/findings';
+import { completionRate, journeyFindings } from '@/lib/journey-findings';
 import { useDesign } from '@/store/use-design';
+import { useJourneys } from '@/store/use-journeys';
 import { useSim } from '@/store/use-sim';
 import { Sparkline } from './Sparkline';
 
@@ -36,11 +39,45 @@ function Tile({
   );
 }
 
+/** After a journey run: how many users finished, and the worst thing that happened. */
+function JourneyCard({ results, bottleneck }: { results: JourneyStats[]; bottleneck: string | undefined }) {
+  const journeys = useDesign((s) => s.journeys);
+  const show = useJourneys((s) => s.show);
+  const settled = results.reduce((n, r) => n + r.started - r.unfinished, 0);
+  const completed = results.reduce((n, r) => n + r.completed, 0);
+  const rate = settled > 0 ? completed / settled : 0;
+  const worst = results
+    .flatMap((r) => {
+      const j = journeys.find((x) => x.id === r.journeyId);
+      return j ? journeyFindings(j, r) : [];
+    })
+    .find((f) => f.severity !== 'info');
+  const tone = rate >= 0.99 && !worst ? 'text-ok' : rate >= 0.95 ? 'text-warn' : 'text-bad-soft';
+  return (
+    <div className="flex min-w-0 flex-col rounded-xl border border-line-strong bg-card px-4 py-3">
+      <div className="flex items-baseline gap-2">
+        <span className={`text-[22px] font-semibold tabular-nums ${tone}`}>{(rate * 100).toFixed(rate > 0.995 && rate < 1 ? 1 : 0)}%</span>
+        <span className="truncate text-[12.5px] text-muted">
+          of users finished {results.length === 1 ? `“${results[0]!.name}”` : `${results.length} journeys`}
+        </span>
+      </div>
+      <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-ink">
+        {worst ? worst.title : `${completed.toLocaleString()} users finished with nothing repeated or left half-done.`}
+      </p>
+      {bottleneck && <p className="mt-0.5 truncate text-[11.5px] text-warn">Bottleneck: {bottleneck}</p>}
+      <button onClick={() => show('results')} className="mt-auto self-start pt-2 text-[12.5px] font-medium text-accent-soft hover:underline">
+        See details and fixes →
+      </button>
+    </div>
+  );
+}
+
 export function MetricsDrawer() {
   const samples = useSim((s) => s.samples);
   const latest = useSim((s) => s.latest);
   const status = useSim((s) => s.status);
   const totals = useSim((s) => s.totals);
+  const journeyResults = useSim((s) => s.journeyResults);
   const nodes = useDesign((s) => s.nodes);
   const edges = useDesign((s) => s.edges);
 
@@ -87,7 +124,9 @@ export function MetricsDrawer() {
           points={series.err}
           format={fmtPct}
         />
-        {shown ? (
+        {status === 'done' && journeyResults ? (
+          <JourneyCard results={journeyResults} bottleneck={sustained?.label} />
+        ) : shown ? (
           <div className="flex min-w-0 flex-col rounded-xl border border-[#5a2a2e] bg-bad-bg px-4 py-3">
             <div className="flex items-center gap-2 text-[14px] font-semibold text-bad-soft">
               <span aria-hidden="true">⚠</span> Bottleneck: {shown.label}

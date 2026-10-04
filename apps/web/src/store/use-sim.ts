@@ -1,10 +1,11 @@
 import { resolveArchetype } from '@scalelab/catalog';
-import type { EngineMetricsSample, LiveChange, NodeSummary, SimulationTotals } from '@scalelab/engine';
+import type { EngineMetricsSample, JourneyStats, LiveChange, NodeSummary, SimulationTotals } from '@scalelab/engine';
 import { type Design, type TrafficPattern, type Workload, deriveFlows, derivedMix } from '@scalelab/model';
 import { create } from 'zustand';
 import { findSustainedBottleneck } from '@/lib/findings';
 import type { FromWorker, ToWorker } from '@/workers/protocol';
 import { snapshot } from './design-doc';
+import { useJourneys } from './use-journeys';
 import { useUi } from './use-ui';
 
 export type SimStatus = 'idle' | 'running' | 'paused' | 'done';
@@ -18,6 +19,12 @@ export interface TrafficSettings {
 }
 
 export const SPEEDS = [1, 2, 5, 10, 20] as const;
+
+/** What a journey run sends: which journeys, how many users start each per second, and whether normal traffic runs too. */
+export interface JourneyRunOptions {
+  journeys: Array<{ journeyId: string; usersPerSec: number }>;
+  withTraffic: boolean;
+}
 
 interface SimState {
   status: SimStatus;
@@ -35,8 +42,12 @@ interface SimState {
   injected: Record<string, { down: boolean; downInstances: number[]; extraLatencyMs: number }>;
   /** Did the previous run end with a bottleneck? Used to celebrate a fix. */
   previousRunHadBottleneck: boolean;
+  /** Set while (or after) a run included journeys. */
+  journeyRun: JourneyRunOptions | undefined;
+  journeyResults: JourneyStats[] | undefined;
 
-  run: () => void;
+  /** Runs normal traffic, or journeys (optionally with normal traffic) when options are given. */
+  run: (journeys?: JourneyRunOptions) => void;
   pause: () => void;
   resume: () => void;
   reset: () => void;
@@ -90,7 +101,14 @@ function handle(msg: FromWorker) {
     case 'done': {
       const { nodes, edges } = snapshot();
       const hadBottleneck = findSustainedBottleneck(state.samples, nodes, edges) !== undefined;
-      useSim.setState({ status: 'done', totals: msg.totals, nodeSummaries: msg.nodes, previousRunHadBottleneck: hadBottleneck });
+      useSim.setState({
+        status: 'done',
+        totals: msg.totals,
+        nodeSummaries: msg.nodes,
+        previousRunHadBottleneck: hadBottleneck,
+        journeyResults: msg.journeys,
+      });
+      if (msg.journeys) useJourneys.getState().show('results');
       if (state.previousRunHadBottleneck && !hadBottleneck && msg.totals.errorRate < 0.01) {
         useUi.getState().celebrate();
       }
@@ -116,9 +134,11 @@ export const useSim = create<SimState>((set, get) => ({
   hints: [],
   injected: {},
   previousRunHadBottleneck: false,
+  journeyRun: undefined,
+  journeyResults: undefined,
 
-  run: () => {
-    const { name, nodes, edges } = snapshot();
+  run: (journeyRun) => {
+    const { name, nodes, edges, journeys } = snapshot();
     const { flows, handlers, hints } = deriveFlows(nodes, edges, resolveArchetype);
     set({ hints });
     if (flows.length === 0) {
@@ -133,14 +153,17 @@ export const useSim = create<SimState>((set, get) => ({
       edges,
       flows,
       handlers,
+      ...(journeyRun ? { journeys } : {}),
       workloads: [],
     };
+    const withTraffic = !journeyRun || journeyRun.withTraffic;
     const workload: Workload = {
       id: 'live',
-      name: 'Live run',
+      name: journeyRun ? 'Journey run' : 'Live run',
       durationSec: traffic.durationSec,
-      pattern: patternOf(traffic),
-      mix: derivedMix(flows),
+      pattern: withTraffic ? patternOf(traffic) : { kind: 'constant', rps: 1 },
+      mix: withTraffic ? derivedMix(flows) : [],
+      ...(journeyRun ? { journeys: journeyRun.journeys } : {}),
       seed: 42,
     };
     set({
@@ -152,6 +175,8 @@ export const useSim = create<SimState>((set, get) => ({
       totals: undefined,
       nodeSummaries: [],
       injected: {},
+      journeyRun,
+      journeyResults: undefined,
     });
     send({ type: 'start', design, workload, speed });
   },
@@ -165,7 +190,17 @@ export const useSim = create<SimState>((set, get) => ({
   },
   reset: () => {
     if (worker) send({ type: 'stop' });
-    set({ status: 'idle', samples: [], latest: undefined, simTimeMs: 0, totals: undefined, nodeSummaries: [], injected: {} });
+    set({
+      status: 'idle',
+      samples: [],
+      latest: undefined,
+      simTimeMs: 0,
+      totals: undefined,
+      nodeSummaries: [],
+      injected: {},
+      journeyRun: undefined,
+      journeyResults: undefined,
+    });
   },
   setSpeed: (speed) => {
     set({ speed });

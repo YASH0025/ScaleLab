@@ -1,5 +1,6 @@
 import type {
   Archetype,
+  ExternalConfig,
   QueueConfig,
   CacheConfig,
   ComputeConfig,
@@ -30,6 +31,8 @@ export const SIMULATED_ARCHETYPES: readonly Archetype[] = [
   'message-queue',
   'event-stream',
   'worker',
+  'external-api',
+  'auth-provider',
 ];
 
 export const isSimulated = (archetype: Archetype): boolean => SIMULATED_ARCHETYPES.includes(archetype);
@@ -115,6 +118,24 @@ export function queueConfig(c: {
     publishLatency: c.publishLatency,
     partitions: c.partitions ?? 0,
     fanOut: c.fanOut ?? false,
+  };
+}
+
+export function externalConfig(c: {
+  latency: Distribution;
+  errorRate: number;
+  timeoutRate: number;
+  timeoutMs?: number;
+  rateLimitRps?: number;
+}): ExternalConfig {
+  return {
+    type: 'external',
+    ...healthy,
+    latency: c.latency,
+    errorRate: c.errorRate,
+    timeoutRate: c.timeoutRate,
+    timeoutMs: c.timeoutMs ?? 5000,
+    rateLimitRps: c.rateLimitRps ?? 0,
   };
 }
 

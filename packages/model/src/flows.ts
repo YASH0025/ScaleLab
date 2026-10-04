@@ -21,7 +21,13 @@ const SERVICES: Archetype[] = ['compute-service', 'worker'];
 /** Nodes that forward requests to services behind them. */
 const ROUTERS: Archetype[] = ['load-balancer', 'gateway', 'cdn'];
 const QUEUES: Archetype[] = ['message-queue', 'event-stream'];
+const EXTERNALS: Archetype[] = ['external-api', 'auth-provider'];
 const MAX_DEPTH = 6;
+
+/** Human-readable side effects, shown in journey results. */
+export const effectSaved = (label: string) => `saved to ${label}`;
+export const effectExternal = (label: string) => `${label} call went through`;
+export const effectPublished = (label: string) => `sent to ${label}`;
 
 /**
  * Builds API flows and message handlers from the canvas graph, so a design drawn
@@ -30,8 +36,13 @@ const MAX_DEPTH = 6;
  *   client → (load balancer / gateway) → services
  *   service → other services   (synchronous calls, nested)
  *   service → cache, database   (data access)
+ *   service → external API      (Stripe, Auth0…; a side effect on writes)
  *   service → queue / stream    (async publish, on writes)
  *   queue → consumers           (each message runs the consumer's own dependencies)
+ *
+ * Inside a service the order is: downstream services, data, external APIs, then messages.
+ * Writes record side effects ("saved to Orders DB", "Stripe call went through") so journeys
+ * can tell when a failed step still changed something.
  *
  * Every service behind the entry point gets a read flow and, when anything below it
  * writes, a write flow. Traffic is split evenly across those services.
@@ -76,14 +87,17 @@ export function deriveFlows(nodes: ArchNode[], edges: ArchEdge[], resolve: Arche
     }
     const cache = targetsOfKind(serviceId, ['cache'])[0];
     const db = targetsOfKind(serviceId, ['relational-db'])[0];
+    const externals = targetsOfKind(serviceId, EXTERNALS);
     if (mode === 'read') {
       const dbRead: FlowStep[] = db ? [{ kind: 'call', nodeId: db, operation: 'read' }] : [];
       if (cache) steps.push({ kind: 'cache-lookup', cacheNodeId: cache, onHit: [], onMiss: dbRead, writeBackOnMiss: Boolean(db) });
       else steps.push(...dbRead);
+      for (const x of externals) steps.push({ kind: 'call', nodeId: x, operation: 'read' });
     } else {
-      if (db) steps.push({ kind: 'call', nodeId: db, operation: 'write' });
+      if (db) steps.push({ kind: 'call', nodeId: db, operation: 'write', effect: effectSaved(label.get(db) ?? db) });
+      for (const x of externals) steps.push({ kind: 'call', nodeId: x, operation: 'write', effect: effectExternal(label.get(x) ?? x) });
       for (const q of targetsOfKind(serviceId, QUEUES)) {
-        if (q !== skipQueue) steps.push({ kind: 'publish', nodeId: q });
+        if (q !== skipQueue) steps.push({ kind: 'publish', nodeId: q, effect: effectPublished(label.get(q) ?? q) });
       }
     }
     return steps;
@@ -91,7 +105,7 @@ export function deriveFlows(nodes: ArchNode[], edges: ArchEdge[], resolve: Arche
 
   /** Does anything at or below this service write data or publish messages? */
   function writes(serviceId: string, stack: string[]): boolean {
-    if (targetsOfKind(serviceId, ['relational-db', ...QUEUES]).length > 0) return true;
+    if (targetsOfKind(serviceId, ['relational-db', ...QUEUES, ...EXTERNALS]).length > 0) return true;
     if (stack.length > MAX_DEPTH) return false;
     return servicesBehind(serviceId).some((n) => !stack.includes(n) && writes(n, [...stack, n]));
   }

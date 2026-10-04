@@ -17,10 +17,10 @@ Early development. This repository currently contains the foundation and the sim
 | `packages/catalog` | Technologies and libraries as data, with realistic default settings |
 | `packages/engine` | Discrete-event simulation engine: traffic, queues, failures, retries, metrics and traces. Pure TypeScript, runs in a Web Worker or Node |
 | `packages/planner` | Cost estimates from list prices, and a capacity planner that finds the cheapest setup meeting your targets |
-| `packages/templates` | Ready-to-run architectures: ShopSphere (e-commerce) and ShopSphere microservices (services + Kafka + workers) |
+| `packages/templates` | Ready-to-run architectures: ShopSphere (e-commerce), ShopSphere microservices (services + Kafka + workers) and ShopSphere checkout (Auth0, Stripe, SendGrid and a Checkout journey) |
 | `packages/config` | Shared TypeScript configuration |
 
-What comes next is in [ROADMAP.md](ROADMAP.md): capacity planning and cost, business journeys and failure paths, infrastructure import, trace calibration, a CI check, and "what will break" impact analysis.
+What comes next is in [ROADMAP.md](ROADMAP.md): infrastructure import, trace calibration, a CI check, and "what will break" impact analysis.
 
 ## Run the playground
 
@@ -67,6 +67,18 @@ Flows are derived from the canvas: every service behind the entry point gets tra
 - **Cost estimate**: every component has a list-price estimate (AWS us-east-1, on-demand, checked October 2026): backends per instance, databases sized by concurrent queries plus read replicas, caches, Kafka clusters, load balancer capacity units, and SQS per message. Storage, data transfer, frontend hosting and discounts are not included.
 - **Plan capacity**: set a traffic level and targets (p95 latency, error rate, queue lag, and headroom: how busy any component may be). The planner simulates candidate setups the way an engineer would (scale the component closest to the root cause, keep the change that helps most per dollar) and then removes anything that isn't needed. It recommends the cheapest setup that meets every target, and applies it to the canvas in one click.
 - It changes capacity only (instances, read replicas, database size, partitions). When only faster code or a cache would help, it says so instead.
+
+## Business journeys and failure paths
+
+- **Outside services**: Stripe, PayPal, Razorpay, Twilio, SendGrid, OpenAI, Auth0, Clerk and a generic third-party API. Each has a response time, an error rate (fails before anything happens), a "slow, no reply" rate (the work is done, like a card being charged, but the caller times out) and a rate limit (429 above it). Break them live: outage or +2 s latency.
+- **Side effects**: a write step records what it changed, like "saved to Orders DB", "Stripe call went through" or "sent to Order events".
+- **Journeys**: users start a journey at a steady rate and go through its steps in order (1 s between steps). Each step calls one service as a read or a write, with 0–5 retries (0.5 s apart) and an optional idempotency key, which makes repeats of the same work count once.
+- **Results**: how many users finished, a per-step funnel, and findings with fixes:
+  - work that happened more than once ("Stripe call went through more than once"): send an idempotency key;
+  - a step that failed after part of it was done ("Pay failed, but Stripe call went through anyway"): make it all-or-nothing, undo on failure, or retry with an idempotency key;
+  - failures that left nothing behind on a step without retries: one retry would recover most of them.
+- **Export as k6 test**: a k6 script with one constant-arrival-rate scenario per journey, the same steps, retries and Idempotency-Key headers. URLs are placeholders built from service names.
+- Try it: open the checkout example (`/play?template=checkout`), run the Checkout journey, then tick "Idem. key" on Pay and run it again.
 
 ## Deploy to Vercel
 

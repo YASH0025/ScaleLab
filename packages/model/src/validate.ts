@@ -22,6 +22,8 @@ const CONFIG_TYPE: Partial<Record<Archetype, ArchetypeConfig['type']>> = {
   worker: 'compute',
   'message-queue': 'queue',
   'event-stream': 'queue',
+  'external-api': 'external',
+  'auth-provider': 'external',
 };
 
 export function expectedConfigType(archetype: Archetype): ArchetypeConfig['type'] {
@@ -180,7 +182,25 @@ export function validateDesign(input: unknown, resolveArchetype: ArchetypeResolv
     }
   }
 
+  const SERVICES: Archetype[] = ['compute-service', 'worker'];
+  for (const journey of design.journeys ?? []) {
+    for (const step of journey.steps) {
+      const kind = archetypes.get(step.serviceNodeId);
+      if (!kind) {
+        issues.push({ severity: 'error', targetId: journey.id, message: `Journey "${journey.name}", step "${step.name}": its service doesn't exist.` });
+      } else if (!SERVICES.includes(kind)) {
+        issues.push({ severity: 'error', targetId: journey.id, message: `Journey "${journey.name}", step "${step.name}": "${step.serviceNodeId}" is not a service.` });
+      }
+    }
+  }
+
+  const journeyIds = new Set((design.journeys ?? []).map((j) => j.id));
   for (const workload of design.workloads) {
+    for (const entry of workload.journeys ?? []) {
+      if (!journeyIds.has(entry.journeyId)) {
+        issues.push({ severity: 'error', targetId: workload.id, message: `Workload "${workload.name}" runs journey "${entry.journeyId}", which doesn't exist.` });
+      }
+    }
     for (const entry of workload.mix) {
       if (!flowIds.has(entry.flowId)) {
         issues.push({

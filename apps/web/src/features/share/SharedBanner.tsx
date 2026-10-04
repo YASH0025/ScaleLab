@@ -20,7 +20,7 @@ export function SharedBanner() {
     }
     useSim.getState().reset();
     useUi.getState().select(undefined);
-    loadDesign({ nodes: backup.nodes, edges: backup.edges, meta: { name: backup.name } });
+    loadDesign({ nodes: backup.nodes, edges: backup.edges, journeys: backup.journeys ?? [], meta: { name: backup.name } });
     clearBackup();
     setBanner(undefined);
     useUi.getState().toast('Your previous design is back.', 'success');

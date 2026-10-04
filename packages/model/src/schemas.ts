@@ -165,6 +165,27 @@ export const QueueConfigSchema = z.object({
   fanOut: z.boolean(),
 });
 
+/**
+ * A third-party service (Stripe, Auth0, Twilio…). You don't control it: it can be slow,
+ * return errors, rate-limit you, or time out after it already did the work.
+ */
+export const ExternalConfigSchema = z.object({
+  type: z.literal('external'),
+  ...base,
+  latency: DistributionSchema,
+  /** Share of calls that fail with an error. Nothing happens on the provider's side. */
+  errorRate: z.number().min(0).max(1),
+  /**
+   * Share of calls that hang until the caller gives up. The provider did the work
+   * (the card was charged), but your service never hears back.
+   */
+  timeoutRate: z.number().min(0).max(1),
+  /** How long your service waits for a reply before giving up. */
+  timeoutMs: z.number().positive(),
+  /** Calls per second the provider accepts before answering 429. 0 means no limit. */
+  rateLimitRps: z.number().int().min(0),
+});
+
 /** Archetypes the engine does not simulate yet carry free-form params. */
 export const GenericConfigSchema = z.object({
   type: z.literal('generic'),
@@ -179,6 +200,7 @@ export const ArchetypeConfigSchema = z.discriminatedUnion('type', [
   CacheConfigSchema,
   RelationalDbConfigSchema,
   QueueConfigSchema,
+  ExternalConfigSchema,
   GenericConfigSchema,
 ]);
 export type ArchetypeConfig = z.infer<typeof ArchetypeConfigSchema>;
@@ -188,6 +210,7 @@ export type ComputeConfig = z.infer<typeof ComputeConfigSchema>;
 export type CacheConfig = z.infer<typeof CacheConfigSchema>;
 export type RelationalDbConfig = z.infer<typeof RelationalDbConfigSchema>;
 export type QueueConfig = z.infer<typeof QueueConfigSchema>;
+export type ExternalConfig = z.infer<typeof ExternalConfigSchema>;
 export type GenericConfig = z.infer<typeof GenericConfigSchema>;
 
 // ─────────────────────────────────────────────────────────────
@@ -222,6 +245,8 @@ export const PricingSchema = z.discriminatedUnion('kind', [
     unitHourlyUsd: z.number().nonnegative(),
     requestsPerSecPerUnit: z.number().positive(),
   }),
+  /** Billed by the provider per use (Stripe fees, Twilio messages). Not part of your infrastructure bill. */
+  z.object({ kind: z.literal('third-party'), provider: z.string() }),
   /** Pay per API request (SQS). Each message takes `requestsPerMessage` requests: send, receive, delete. */
   z.object({ kind: z.literal('per-request'), perMillionUsd: z.number().nonnegative(), requestsPerMessage: z.number().positive() }),
 ]);
@@ -341,7 +366,16 @@ export type FlowStep =
    * Uses a node. On a backend the first call takes one of its workers and keeps it
    * until the request finishes (the entry service). On a cache or database it is one round trip.
    */
-  | { kind: 'call'; nodeId: string; operation: 'read' | 'write' | 'process' }
+  | {
+      kind: 'call';
+      nodeId: string;
+      operation: 'read' | 'write' | 'process';
+      /**
+       * A side effect this call makes in the world, like "saved to Orders DB" or
+       * "Stripe call went through". Recorded when it happens, even if the request later fails.
+       */
+      effect?: string;
+    }
   /**
    * A synchronous call to another backend service (microservices). The callee takes a
    * worker, does its own work, runs `steps` (its own dependencies), then frees the worker
@@ -357,7 +391,7 @@ export type FlowStep =
     }
   | { kind: 'parallel'; branches: FlowStep[][] }
   /** Sends a message to a queue or stream and continues without waiting for consumers. */
-  | { kind: 'publish'; nodeId: string }
+  | { kind: 'publish'; nodeId: string; effect?: string }
   | { kind: 'respond'; status: number };
 
 export const FlowStepSchema: z.ZodType<FlowStep> = z.lazy(() =>
@@ -366,6 +400,7 @@ export const FlowStepSchema: z.ZodType<FlowStep> = z.lazy(() =>
       kind: z.literal('call'),
       nodeId: z.string(),
       operation: z.enum(['read', 'write', 'process']),
+      effect: z.string().optional(),
     }),
     z.object({ kind: z.literal('service-call'), nodeId: z.string(), steps: z.array(FlowStepSchema) }),
     z.object({
@@ -376,7 +411,7 @@ export const FlowStepSchema: z.ZodType<FlowStep> = z.lazy(() =>
       writeBackOnMiss: z.boolean(),
     }),
     z.object({ kind: z.literal('parallel'), branches: z.array(z.array(FlowStepSchema)) }),
-    z.object({ kind: z.literal('publish'), nodeId: z.string() }),
+    z.object({ kind: z.literal('publish'), nodeId: z.string(), effect: z.string().optional() }),
     z.object({ kind: z.literal('respond'), status: z.number().int() }),
   ]),
 );
@@ -422,7 +457,10 @@ export const WorkloadSchema = z.object({
   name: z.string().min(1),
   durationSec: z.number().positive(),
   pattern: TrafficPatternSchema,
-  mix: z.array(z.object({ flowId: z.string(), weight: z.number().positive() })).min(1),
+  /** Single requests. Can be empty when only journeys run. */
+  mix: z.array(z.object({ flowId: z.string(), weight: z.number().positive() })),
+  /** Users starting each journey per second, alongside the request mix. */
+  journeys: z.array(z.object({ journeyId: z.string(), usersPerSec: z.number().positive() })).optional(),
   /** Same seed + same design gives identical results on every machine. */
   seed: z.number().int(),
 });
@@ -431,6 +469,33 @@ export type Workload = z.infer<typeof WorkloadSchema>;
 // ─────────────────────────────────────────────────────────────
 // A complete design (what the Yjs document stores)
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Journeys: what a user does, step by step
+// ─────────────────────────────────────────────────────────────
+export const JourneyStepSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  /** The service that handles this step. */
+  serviceNodeId: z.string(),
+  /** Reads look things up; writes change data and trigger side effects. */
+  operation: z.enum(['read', 'write']),
+  /** How many times the user's app retries this step after a failure. */
+  retries: z.number().int().min(0).max(5),
+  /**
+   * Retries reuse an idempotency key, so a side effect that already happened
+   * isn't applied a second time (no double charges).
+   */
+  idempotent: z.boolean(),
+});
+export type JourneyStep = z.infer<typeof JourneyStepSchema>;
+
+export const JourneySchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  steps: z.array(JourneyStepSchema).min(1).max(20),
+});
+export type Journey = z.infer<typeof JourneySchema>;
+
 /**
  * What a consumer does with each message it takes from a queue or stream.
  * The first step usually takes a worker on the consumer for the whole job.
@@ -455,6 +520,8 @@ export const DesignSchema = z.object({
   flows: z.array(ApiFlowSchema),
   /** Consumers of queues and streams. Optional so older designs stay valid. */
   handlers: z.array(MessageHandlerSchema).optional(),
+  /** User journeys through the system. */
+  journeys: z.array(JourneySchema).optional(),
   workloads: z.array(WorkloadSchema),
 });
 export type Design = z.infer<typeof DesignSchema>;

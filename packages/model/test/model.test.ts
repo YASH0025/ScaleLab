@@ -168,3 +168,28 @@ describe('validateDesign', () => {
     expect(validateDesign(design, resolve).some((i) => i.targetId === 'api')).toBe(true);
   });
 });
+
+describe('journey validation', () => {
+  const step = (serviceNodeId: string) => ({ id: 's', name: 'Pay', serviceNodeId, operation: 'write' as const, retries: 0, idempotent: false });
+
+  it('accepts journeys through services', () => {
+    const design = validDesign();
+    design.journeys = [{ id: 'j', name: 'Checkout', steps: [step('api')] }];
+    design.workloads[0]!.journeys = [{ journeyId: 'j', usersPerSec: 10 }];
+    expect(validateDesign(design, resolve)).toEqual([]);
+  });
+
+  it('rejects steps on missing nodes or non-services', () => {
+    const design = validDesign();
+    design.journeys = [{ id: 'j', name: 'Checkout', steps: [step('ghost'), step('db')] }];
+    const messages = validateDesign(design, resolve).map((i) => i.message);
+    expect(messages.some((m) => m.includes("its service doesn't exist"))).toBe(true);
+    expect(messages.some((m) => m.includes('is not a service'))).toBe(true);
+  });
+
+  it('rejects workloads that run missing journeys', () => {
+    const design = validDesign();
+    design.workloads[0]!.journeys = [{ journeyId: 'nope', usersPerSec: 10 }];
+    expect(validateDesign(design, resolve).some((i) => i.targetId === 'w')).toBe(true);
+  });
+});

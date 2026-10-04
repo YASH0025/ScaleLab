@@ -8,6 +8,8 @@ export {
   type EngineMetricsSample,
   type EngineNodeSample,
   type InstanceSample,
+  type JourneyStats,
+  type JourneyStepStats,
   type LiveChange,
   type NodeSummary,
   type ScheduledChange,

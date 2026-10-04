@@ -1,5 +1,5 @@
 import { resolveArchetype } from '@scalelab/catalog';
-import { ArchEdgeSchema, ArchNodeSchema, type ArchEdge, type ArchNode, validateDesign } from '@scalelab/model';
+import { ArchEdgeSchema, ArchNodeSchema, type ArchEdge, type ArchNode, type Journey, JourneySchema, validateDesign } from '@scalelab/model';
 import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from 'lz-string';
 import { z } from 'zod';
 
@@ -28,6 +28,7 @@ const PayloadSchema = z.object({
   name: z.string().max(120),
   nodes: z.array(ArchNodeSchema).max(200),
   edges: z.array(ArchEdgeSchema).max(500),
+  journeys: z.array(JourneySchema).max(20).optional(),
   traffic: TrafficSchema.optional(),
 });
 
@@ -35,6 +36,7 @@ export interface SharedDesign {
   name: string;
   nodes: ArchNode[];
   edges: ArchEdge[];
+  journeys?: Journey[];
   traffic?: SharedTraffic;
 }
 
@@ -61,7 +63,7 @@ export function decodeDesign(encoded: string): DecodeResult {
   const parsed = PayloadSchema.safeParse(json);
   if (!parsed.success) return { ok: false, error: 'This share link was made by a different version of ScaleLab.' };
 
-  const { name, nodes, edges, traffic } = parsed.data;
+  const { name, nodes, edges, journeys, traffic } = parsed.data;
   const issues = validateDesign(
     {
       schemaVersion: 1,
@@ -69,13 +71,17 @@ export function decodeDesign(encoded: string): DecodeResult {
       nodes,
       edges,
       flows: [],
+      ...(journeys ? { journeys } : {}),
       workloads: [],
     },
     resolveArchetype,
   ).filter((i) => i.severity === 'error');
   if (issues.length > 0) return { ok: false, error: `This shared design has a problem: ${issues[0]!.message}` };
 
-  return { ok: true, design: { name: name || 'Shared design', nodes, edges, ...(traffic ? { traffic } : {}) } };
+  return {
+    ok: true,
+    design: { name: name || 'Shared design', nodes, edges, ...(journeys?.length ? { journeys } : {}), ...(traffic ? { traffic } : {}) },
+  };
 }
 
 export function shareUrl(origin: string, design: SharedDesign): string {

@@ -47,6 +47,13 @@ describe('estimateCost', () => {
     expect(line(estimateCost(nodes, { messagesPerSec: { q: 100 } }), 'q').monthlyUsd).toBeCloseTo(315.36, 1);
   });
 
+  it('marks third-party services as billed by the provider', () => {
+    const nodes = buildDesign('t', '', [{ id: 's', tech: 'stripe', label: 's', x: 0, y: 0 }], []).nodes;
+    const est = estimateCost(nodes);
+    expect(line(est, 's').basis).toMatch(/Billed by Stripe/);
+    expect(est.unpricedCount).toBe(0);
+  });
+
   it('flags technologies without a price', () => {
     const nodes = buildDesign('t', '', [{ id: 'm', tech: 'mongodb', label: 'm', x: 0, y: 0 }], []).nodes;
     const est = estimateCost(nodes);

@@ -3,6 +3,7 @@ import { libraries as libraryList } from './libraries';
 import { backendTechnologies } from './technologies/backends';
 import { clientTechnologies } from './technologies/clients';
 import { dataTechnologies } from './technologies/data';
+import { externalTechnologies } from './technologies/external';
 import { loadBalancerTechnologies } from './technologies/load-balancers';
 import { messagingTechnologies, workerTechnologies } from './technologies/messaging';
 import { upcomingTechnologies } from './technologies/upcoming';
@@ -18,6 +19,7 @@ export const technologies: readonly TechnologyDefinition[] = [
   ...dataTechnologies,
   ...messagingTechnologies,
   ...workerTechnologies,
+  ...externalTechnologies,
   ...upcomingTechnologies,
 ].map((t) => {
   const pricing = pricingFor(t.id, t.archetype);

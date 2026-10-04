@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, Design } from '@scalelab/model';
+import type { ArchEdge, ArchNode, Design, Journey } from '@scalelab/model';
 import * as Y from 'yjs';
 
 /**
@@ -13,11 +13,13 @@ export const doc = new Y.Doc();
 const nodesMap = doc.getMap<ArchNode>('nodes');
 const edgesMap = doc.getMap<ArchEdge>('edges');
 const metaMap = doc.getMap<string>('meta');
+const journeysMap = doc.getMap<Journey>('journeys');
 
 export interface DesignSnapshot {
   name: string;
   nodes: ArchNode[];
   edges: ArchEdge[];
+  journeys: Journey[];
 }
 
 export function snapshot(): DesignSnapshot {
@@ -25,6 +27,7 @@ export function snapshot(): DesignSnapshot {
     name: metaMap.get('name') ?? 'Untitled design',
     nodes: [...nodesMap.values()],
     edges: [...edgesMap.values()],
+    journeys: [...journeysMap.values()],
   };
 }
 
@@ -37,14 +40,24 @@ export function subscribe(listener: () => void): () => void {
   return () => doc.off('update', listener);
 }
 
-export function loadDesign(design: Pick<Design, 'nodes' | 'edges'> & { meta: { name: string } }): void {
+export function loadDesign(design: Pick<Design, 'nodes' | 'edges' | 'journeys'> & { meta: { name: string } }): void {
   doc.transact(() => {
     nodesMap.clear();
     edgesMap.clear();
+    journeysMap.clear();
     for (const n of design.nodes) nodesMap.set(n.id, n);
     for (const e of design.edges) edgesMap.set(e.id, e);
+    for (const j of design.journeys ?? []) journeysMap.set(j.id, j);
     metaMap.set('name', design.meta.name);
   });
+}
+
+export function saveJourney(journey: Journey): void {
+  journeysMap.set(journey.id, journey);
+}
+
+export function removeJourney(id: string): void {
+  journeysMap.delete(id);
 }
 
 export function clearDesign(name = 'Untitled design'): void {
@@ -69,11 +82,18 @@ export function moveNode(id: string, position: { x: number; y: number }): void {
 }
 
 /** Removes nodes and every edge touching them. */
+/** Removes nodes, every edge touching them, and journey steps that used them. */
 export function removeNodes(ids: string[]): void {
   const gone = new Set(ids);
   doc.transact(() => {
     for (const id of ids) nodesMap.delete(id);
     for (const [id, e] of edgesMap) if (gone.has(e.source) || gone.has(e.target)) edgesMap.delete(id);
+    for (const [id, j] of journeysMap) {
+      if (!j.steps.some((s) => gone.has(s.serviceNodeId))) continue;
+      const steps = j.steps.filter((s) => !gone.has(s.serviceNodeId));
+      if (steps.length === 0) journeysMap.delete(id);
+      else journeysMap.set(id, { ...j, steps });
+    }
   });
 }
 

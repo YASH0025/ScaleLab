@@ -160,6 +160,35 @@ function explainQueue(
   };
 }
 
+/** A bottleneck must last this many seconds in a row to count in a run's summary. */
+export const SUSTAINED_SECONDS = 3;
+
+/**
+ * The bottleneck of a whole run: the component under pressure for the longest stretch,
+ * as long as it lasted at least `minSeconds` in a row. A one-second spike is noise,
+ * not a bottleneck, especially for queue consumers whose backlog absorbs bursts.
+ */
+export function findSustainedBottleneck(
+  samples: readonly EngineMetricsSample[],
+  nodes: ArchNode[],
+  edges: ArchEdge[],
+  minSeconds = SUSTAINED_SECONDS,
+): Bottleneck | undefined {
+  let best: { bottleneck: Bottleneck; streak: number } | undefined;
+  let streakId: string | undefined;
+  let streak = 0;
+  for (const sample of samples) {
+    const b = findBottleneck(sample, nodes, edges);
+    if (b && b.nodeId === streakId) streak++;
+    else {
+      streakId = b?.nodeId;
+      streak = b ? 1 : 0;
+    }
+    if (b && streak >= minSeconds && (!best || streak >= best.streak)) best = { bottleneck: b, streak };
+  }
+  return best?.bottleneck;
+}
+
 export type Health = 'idle' | 'ok' | 'warm' | 'hot' | 'down';
 
 export function healthOf(utilization: number | undefined, up = true): Health {

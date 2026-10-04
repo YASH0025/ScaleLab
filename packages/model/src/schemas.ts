@@ -193,6 +193,40 @@ export type GenericConfig = z.infer<typeof GenericConfigSchema>;
 // ─────────────────────────────────────────────────────────────
 // Catalog: technologies and libraries as data
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Pricing: list-price estimates, never quotes
+// ─────────────────────────────────────────────────────────────
+export const PricingSchema = z.discriminatedUnion('kind', [
+  /** Nothing to pay for in the modeled system (users' browsers, frontends hosted elsewhere). */
+  z.object({ kind: z.literal('free') }),
+  /** One machine per instance (backends, workers); self-hosted proxies count as one instance. */
+  z.object({ kind: z.literal('per-instance'), hourlyUsd: z.number().nonnegative(), instanceClass: z.string() }),
+  /**
+   * A managed database. Concurrent-query capacity (the connection pool) needs a bigger instance:
+   * each doubling past `queriesPerUnit` doubles the price. Read replicas cost the same as the primary.
+   */
+  z.object({
+    kind: z.literal('database'),
+    hourlyUsd: z.number().nonnegative(),
+    instanceClass: z.string(),
+    queriesPerUnit: z.number().int().positive(),
+  }),
+  /** A single managed node (a cache). */
+  z.object({ kind: z.literal('node'), hourlyUsd: z.number().nonnegative(), instanceClass: z.string() }),
+  /** A cluster of brokers billed per broker (Kafka). */
+  z.object({ kind: z.literal('cluster'), hourlyUsd: z.number().nonnegative(), nodes: z.number().int().positive(), instanceClass: z.string() }),
+  /** A managed load balancer: an hourly base plus capacity units that grow with traffic. */
+  z.object({
+    kind: z.literal('load-balancer'),
+    hourlyUsd: z.number().nonnegative(),
+    unitHourlyUsd: z.number().nonnegative(),
+    requestsPerSecPerUnit: z.number().positive(),
+  }),
+  /** Pay per API request (SQS). Each message takes `requestsPerMessage` requests: send, receive, delete. */
+  z.object({ kind: z.literal('per-request'), perMillionUsd: z.number().nonnegative(), requestsPerMessage: z.number().positive() }),
+]);
+export type Pricing = z.infer<typeof PricingSchema>;
+
 export const TechnologyDefinitionSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
   name: z.string().min(1),
@@ -206,6 +240,8 @@ export const TechnologyDefinitionSchema = z.object({
   defaults: ArchetypeConfigSchema,
   /** False shows a "simulation coming soon" badge in the UI. */
   simulationSupported: z.boolean(),
+  /** List-price estimate. Missing means "not priced yet". */
+  pricing: PricingSchema.optional(),
 });
 export type TechnologyDefinition = z.infer<typeof TechnologyDefinitionSchema>;
 

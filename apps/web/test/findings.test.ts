@@ -2,7 +2,7 @@ import { getLibrary } from '@scalelab/catalog';
 import { simulate } from '@scalelab/engine';
 import { microShop, shopSphere } from '@scalelab/templates';
 import { describe, expect, it } from 'vitest';
-import { findBottleneck, healthOf, healthOfSample } from '../src/lib/findings';
+import { findBottleneck, findSustainedBottleneck, healthOf, healthOfSample } from '../src/lib/findings';
 
 const libraryEffect = (id: string) => getLibrary(id)?.effect;
 
@@ -79,5 +79,30 @@ describe('queue findings', () => {
     expect(healthOfSample({ ...base, lagMs: 2000 }, 'event-stream')).toBe('warm');
     expect(healthOfSample({ ...base, lagMs: 9000 }, 'message-queue')).toBe('hot');
     expect(healthOfSample({ ...base, lagMs: 9000 }, 'relational-db')).toBe('ok');
+  });
+});
+
+describe('findSustainedBottleneck', () => {
+  const sample = (sec: number, util: number) => ({
+    simTimeSec: sec,
+    offeredRps: 100,
+    throughputRps: 100,
+    p50Ms: 10,
+    p95Ms: 20,
+    p99Ms: 30,
+    errorRate: 0,
+    inFlight: 0,
+    nodes: [{ nodeId: 'postgres', utilization: util, queueLength: 5, avgWaitMs: 1, servedPerSec: 100, up: true }],
+  });
+  const design = shopSphere({ cache: false });
+
+  it('ignores a one-second spike', () => {
+    const samples = [0.7, 0.75, 0.95, 0.7, 0.72].map((u, i) => sample(i + 1, u));
+    expect(findSustainedBottleneck(samples, design.nodes, design.edges)).toBeUndefined();
+  });
+
+  it('reports pressure that lasts', () => {
+    const samples = [0.7, 0.93, 0.95, 0.96, 0.72].map((u, i) => sample(i + 1, u));
+    expect(findSustainedBottleneck(samples, design.nodes, design.edges)?.nodeId).toBe('postgres');
   });
 });

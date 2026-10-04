@@ -54,6 +54,14 @@ describe('technology catalog', () => {
     }
   });
 
+  it('prices every simulated technology', () => {
+    for (const t of technologies) {
+      if (t.simulationSupported) expect(t.pricing, t.id).toBeDefined();
+    }
+    expect(getTechnology('nextjs')?.pricing).toEqual({ kind: 'free' });
+    expect(getTechnology('mongodb')?.pricing).toBeUndefined();
+  });
+
   it('resolves archetypes and lookups', () => {
     expect(resolveArchetype('postgresql')).toBe('relational-db');
     expect(resolveArchetype('does-not-exist')).toBeUndefined();

@@ -2,7 +2,7 @@ import { resolveArchetype } from '@scalelab/catalog';
 import type { EngineMetricsSample, LiveChange, NodeSummary, SimulationTotals } from '@scalelab/engine';
 import { type Design, type TrafficPattern, type Workload, deriveFlows, derivedMix } from '@scalelab/model';
 import { create } from 'zustand';
-import { findBottleneck } from '@/lib/findings';
+import { findSustainedBottleneck } from '@/lib/findings';
 import type { FromWorker, ToWorker } from '@/workers/protocol';
 import { snapshot } from './design-doc';
 import { useUi } from './use-ui';
@@ -89,7 +89,7 @@ function handle(msg: FromWorker) {
     }
     case 'done': {
       const { nodes, edges } = snapshot();
-      const hadBottleneck = state.samples.some((s) => findBottleneck(s, nodes, edges));
+      const hadBottleneck = findSustainedBottleneck(state.samples, nodes, edges) !== undefined;
       useSim.setState({ status: 'done', totals: msg.totals, nodeSummaries: msg.nodes, previousRunHadBottleneck: hadBottleneck });
       if (state.previousRunHadBottleneck && !hadBottleneck && msg.totals.errorRate < 0.01) {
         useUi.getState().celebrate();

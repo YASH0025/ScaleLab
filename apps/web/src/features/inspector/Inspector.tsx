@@ -1,9 +1,12 @@
 'use client';
 
-import { getLibrary, getTechnology, librariesFor, libraryConflicts } from '@scalelab/catalog';
+import { PRICING_NOTE, getLibrary, getTechnology, librariesFor, libraryConflicts } from '@scalelab/catalog';
+import { formatUsd } from '@scalelab/planner';
 import { type ArchNode, type ArchetypeConfig, type Distribution, affectsSimulation, archetypeName } from '@scalelab/model';
 import { type ReactNode, useState } from 'react';
 import { TechIcon } from '@/lib/tech-icon';
+import { useCost } from '@/lib/use-cost';
+import { usePlan } from '@/store/use-plan';
 import { removeNodes, updateNode } from '@/store/design-doc';
 import { useDesign } from '@/store/use-design';
 import { useSim } from '@/store/use-sim';
@@ -261,6 +264,57 @@ function Failures({ node }: { node: ArchNode }) {
   );
 }
 
+function CostSummary() {
+  const { estimate, rps } = useCost();
+  const show = usePlan((s) => s.show);
+  const paid = estimate.lines.filter((l) => l.monthlyUsd > 0).sort((a, b) => b.monthlyUsd - a.monthlyUsd);
+  return (
+    <section className="mt-5 rounded-xl border border-line bg-card px-3.5 py-3">
+      <div className="text-[12px] text-muted">Estimated cost at {rps.toLocaleString()} rps</div>
+      <div className="mt-0.5 text-[22px] font-semibold tabular-nums">
+        {formatUsd(estimate.monthlyUsd)}
+        <span className="ml-1 text-[13px] font-normal text-muted">/ month</span>
+      </div>
+      {paid.length > 0 && (
+        <ul className="mt-2 space-y-1 text-[12px]">
+          {paid.map((l) => (
+            <li key={l.nodeId} className="flex justify-between gap-2">
+              <span className="truncate text-muted" title={l.basis}>
+                {l.label}
+              </span>
+              <span className="shrink-0 font-mono">{formatUsd(l.monthlyUsd)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {estimate.unpricedCount > 0 && (
+        <p className="mt-2 text-[11px] text-faint">
+          {estimate.unpricedCount} component{estimate.unpricedCount > 1 ? 's aren’t' : ' isn’t'} priced yet.
+        </p>
+      )}
+      <p className="mt-2 text-[11px] leading-relaxed text-faint">{PRICING_NOTE}</p>
+      <button
+        onClick={show}
+        className="mt-3 w-full rounded-lg border border-accent/60 px-3 py-1.5 text-[12.5px] text-accent-soft hover:bg-raised"
+      >
+        Find the cheapest setup for my traffic
+      </button>
+    </section>
+  );
+}
+
+function NodeCost({ nodeId }: { nodeId: string }) {
+  const { estimate } = useCost();
+  const line = estimate.lines.find((l) => l.nodeId === nodeId);
+  if (!line) return null;
+  return (
+    <p className="mb-2 text-[12px] text-muted">
+      {line.unpriced ? 'Not priced yet' : `≈ ${formatUsd(line.monthlyUsd)} / month`}
+      {!line.unpriced && <span className="text-faint"> · {line.basis}</span>}
+    </p>
+  );
+}
+
 function Overview() {
   const nodes = useDesign((s) => s.nodes);
   const hints = useSim((s) => s.hints);
@@ -282,6 +336,7 @@ function Overview() {
         <li>Press Delete to remove the selected component.</li>
         <li>All numbers are modeled estimates, not measurements.</li>
       </ul>
+      {nodes.length > 0 && <CostSummary />}
     </div>
   );
 }
@@ -314,6 +369,7 @@ export function Inspector() {
             </div>
           </div>
           <Section title="Configuration">
+            <NodeCost nodeId={node.id} />
             {running && <p className="mb-1 text-[11px] text-faint">Changes apply on the next run.</p>}
             <ConfigFields node={node} />
           </Section>

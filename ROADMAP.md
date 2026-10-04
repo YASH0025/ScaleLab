@@ -13,12 +13,9 @@ All numbers ScaleLab shows are modeled estimates, never measurements of a real s
 - **Playground**: drag technologies onto a canvas, connect them, run simulated traffic, break things live, see the bottleneck explained.
 - **Share by link**: a whole design in one URL, no account needed.
 - **1. Microservices and async queues**: services calling services; RabbitMQ, SQS, Kafka and Redpanda with consumer lag, partitions, retries and dead letters.
+- **2. Capacity planner and cost estimator**: monthly cost from AWS list prices, and a planner that finds the cheapest setup meeting latency, error, lag and headroom targets, then applies it in one click. Later: GCP and Azure prices, editable prices, reserved and spot discounts.
 
 ## Next
-
-### 2. Capacity planner and cost estimator
-- "I need 10,000 requests per second with p95 under 200 ms. What's the smallest setup?" ScaleLab searches configurations and recommends one.
-- Monthly cost of a design on AWS or GCP at that load, and how each change moves the cost.
 
 ### 7. Business journeys and failure paths
 - Draw a user journey across services, like login → add to cart → payment → order confirmation, with branches such as payment succeeded or failed.
@@ -44,7 +41,7 @@ All numbers ScaleLab shows are modeled estimates, never measurements of a real s
 ## Build order
 
 1. ~~Microservices and async queues~~
-2. Capacity planner and cost estimator
+2. ~~Capacity planner and cost estimator~~
 3. Business journeys and failure paths (point 7)
 4. Infrastructure import
 5. Trace calibration

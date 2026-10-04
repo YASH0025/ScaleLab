@@ -14,6 +14,7 @@
     "@scalelab/catalog": "*",
     "@scalelab/engine": "*",
     "@scalelab/model": "*",
+    "@scalelab/planner": "*",
     "@scalelab/templates": "*",
     "@xyflow/react": "^12.12.0",
     "echarts": "^6.1.0",

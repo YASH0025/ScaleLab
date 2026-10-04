@@ -3,6 +3,7 @@
 import { microShop, shopSphere } from '@scalelab/templates';
 import { useState } from 'react';
 import { ShareButton } from '@/features/share/ShareButton';
+import { usePlan } from '@/store/use-plan';
 import { clearDesign, loadDesign, renameDesign } from '@/store/design-doc';
 import { useDesign } from '@/store/use-design';
 import { SPEEDS, type TrafficSettings, useSim } from '@/store/use-sim';
@@ -191,6 +192,13 @@ export function Toolbar() {
         {trafficOpen && <TrafficPopover onClose={() => setTrafficOpen(false)} />}
       </div>
       <div className="mx-1 h-6 w-px bg-line" aria-hidden="true" />
+      <button onClick={() => usePlan.getState().show()} className={btn} title="Find the cheapest setup that meets your targets">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <path d="M3 3v18h18" />
+          <path d="m7 15 4-4 3 3 5-6" />
+        </svg>
+        Plan capacity
+      </button>
       <ShareButton className={btn} />
     </header>
   );

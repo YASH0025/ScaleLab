@@ -6,8 +6,10 @@ import { dataTechnologies } from './technologies/data';
 import { loadBalancerTechnologies } from './technologies/load-balancers';
 import { messagingTechnologies, workerTechnologies } from './technologies/messaging';
 import { upcomingTechnologies } from './technologies/upcoming';
+import { pricingFor } from './pricing';
 
 export { SIMULATED_ARCHETYPES, isSimulated } from './defaults';
+export { PRICES_CHECKED, PRICING_NOTE } from './pricing';
 
 export const technologies: readonly TechnologyDefinition[] = [
   ...clientTechnologies,
@@ -17,7 +19,10 @@ export const technologies: readonly TechnologyDefinition[] = [
   ...messagingTechnologies,
   ...workerTechnologies,
   ...upcomingTechnologies,
-];
+].map((t) => {
+  const pricing = pricingFor(t.id, t.archetype);
+  return pricing ? { ...t, pricing } : t;
+});
 
 export const libraries: readonly LibraryDefinition[] = libraryList;
 

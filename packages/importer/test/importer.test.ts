@@ -301,3 +301,57 @@ describe('layout details', () => {
     expect(y('users')).toBeLessThan(y('worker'));
   });
 });
+
+describe('monorepos that build every service from the root', () => {
+  const f = (o: Record<string, string>) => Object.entries(o).map(([path, content]) => ({ path, content }));
+  const r = analyzeProject(
+    f({
+      '.env': 'IMAGE=ghcr.io/acme/shop\nCART_DOCKERFILE=./src/cart/Dockerfile\nCART_PORT=7070\nCART_ADDR=cart:${CART_PORT}\nVALKEY_IMAGE=ghcr.io/valkey-io/valkey:9\n',
+      'compose.yaml': `
+services:
+  cart:
+    image: \${IMAGE}:cart
+    build:
+      context: ./
+      dockerfile: \${CART_DOCKERFILE}
+    ports: ["\${CART_PORT}"]
+    depends_on: [valkey]
+  checkout:
+    build:
+      context: ./
+      dockerfile: ./src/checkout/Dockerfile
+    ports: ["5050"]
+    environment:
+      - CART_ADDR
+  quote:
+    build:
+      context: ./
+      dockerfile: ./src/quote/Dockerfile
+    ports: ["8090"]
+  valkey:
+    image: \${VALKEY_IMAGE:-redis:7}
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.100.0
+`,
+      'package.json': JSON.stringify({ name: 'shop', devDependencies: { prettier: '3' } }),
+      'src/cart/package.json': JSON.stringify({ name: 'cart', dependencies: { express: '4', ioredis: '5' } }),
+      'src/checkout/go.mod': 'module checkout\nrequire google.golang.org/grpc v1.64.0\n',
+      'src/quote/Dockerfile': 'FROM composer:2 AS build\nFROM php:8.3-cli\n',
+    }),
+    'shop',
+  );
+
+  it('substitutes .env variables and finds each app from its Dockerfile folder', () => {
+    expect(tech(r)).toMatchObject({ cart: 'express', checkout: 'go-gin', valkey: 'valkey' });
+    expect(comp(r, 'cart')!.confidence).toBe('high');
+    expect(linked(r, 'cart', 'valkey')).toBe(true);
+    expect(linked(r, 'checkout', 'cart')).toBe(true); // CART_ADDR=cart:7070, passed through from .env
+  });
+
+  it('keeps services in languages the catalog lacks, as generic web services', () => {
+    expect(comp(r, 'quote')!.technologyId).toBe('express');
+    expect(comp(r, 'quote')!.note).toMatch(/Written in PHP/);
+    expect(comp(r, 'collector')).toBeUndefined();
+    expect(r.notes).toEqual(expect.arrayContaining([expect.stringMatching(/collector.*observability tool/)]));
+  });
+});

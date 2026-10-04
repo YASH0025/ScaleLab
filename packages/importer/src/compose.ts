@@ -26,13 +26,37 @@ type Raw = Record<string, unknown>;
 const asRecord = (v: unknown): Raw | undefined => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Raw) : undefined);
 const asList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
-function envOf(raw: unknown): Array<[string, string]> {
+/**
+ * Compose's variable substitution: ${VAR}, ${VAR:-default}, ${VAR-default} and $VAR,
+ * with values from the .env file next to the compose file. "$$" is a literal "$".
+ */
+export function interpolate(text: string, vars: Map<string, string>): string {
+  return text.replace(/\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, name, op, fallback, bare) => {
+    if (m === '$$') return '$';
+    const key = (name ?? bare) as string;
+    const value = vars.get(key);
+    if (op === ':-' || op === ':?') return value ? value : op === ':-' ? (fallback ?? '') : '';
+    if (op === '-' || op === '?') return value !== undefined ? value : op === '-' ? (fallback ?? '') : '';
+    return value ?? '';
+  });
+}
+
+/** Reads a .env file the way Compose does: later lines can use earlier variables. */
+export function composeVars(text: string | undefined): Map<string, string> {
+  const vars = new Map<string, string>();
+  if (!text) return vars;
+  for (const [k, v] of parseEnv(text)) vars.set(k, interpolate(v, vars));
+  return vars;
+}
+
+function envOf(raw: unknown, vars: Map<string, string>): Array<[string, string]> {
   if (Array.isArray(raw)) {
     return raw
       .filter((x): x is string => typeof x === 'string')
       .map((line) => {
         const i = line.indexOf('=');
-        return (i < 0 ? [line, ''] : [line.slice(0, i), line.slice(i + 1)]) as [string, string];
+        // "- KAFKA_ADDR" with no value passes the variable through from .env.
+        return (i < 0 ? [line, vars.get(line) ?? ''] : [line.slice(0, i), line.slice(i + 1)]) as [string, string];
       });
   }
   const rec = asRecord(raw);
@@ -68,9 +92,10 @@ export function readCompose(files: RepoFile[], all: Map<string, RepoFile>): { se
   const ordered = [...files].sort((a, b) => Number(/override/.test(a.path)) - Number(/override/.test(b.path)) || a.path.length - b.path.length);
 
   for (const file of ordered) {
+    const vars = composeVars(all.get(joinPath(dirOf(file.path), '.env'))?.content);
     let doc: unknown;
     try {
-      doc = parse(file.content);
+      doc = parse(interpolate(file.content, vars));
     } catch {
       notes.push(`Couldn't read ${file.path}; it isn't valid YAML.`);
       continue;
@@ -91,7 +116,7 @@ export function readCompose(files: RepoFile[], all: Map<string, RepoFile>): { se
       const dependsOn = Array.isArray(dependsRaw) ? asList(dependsRaw) : Object.keys(asRecord(dependsRaw) ?? {});
       const links = asList(svc.links).map((l) => l.split(':')[0]!);
 
-      const env = envOf(svc.environment);
+      const env = envOf(svc.environment, vars);
       const envFiles = typeof svc.env_file === 'string' ? [svc.env_file] : asList(svc.env_file);
       for (const f of envFiles) {
         const envFile = all.get(joinPath(base, f));
@@ -135,6 +160,7 @@ export function matchImage(image: string): ImageMatch {
   repo = repo.replace(/^(docker\.io\/|registry\.hub\.docker\.com\/|public\.ecr\.aws\/|ghcr\.io\/|quay\.io\/|mcr\.microsoft\.com\/)/, '').replace(/^library\//, '');
   const last = repo.split('/').pop()!;
 
+  if (/opentelemetry-collector|^otel\/|jaeger|zipkin|tempo|loki|fluent-?bit|fluentd|datadog\/agent|newrelic/.test(repo)) return { skip: 'an observability tool' };
   if (DEV_TOOLS.test(repo) || DEV_TOOLS.test(last)) return { skip: 'a local development tool' };
   if (/zookeeper/.test(repo)) return { skip: 'part of Kafka' };
   if (/localstack/.test(repo)) return { skip: 'a local AWS emulator' };
@@ -142,7 +168,7 @@ export function matchImage(image: string): ImageMatch {
   if (/^(mysql|mariadb|bitnami\/mysql|bitnami\/mariadb|percona)$/.test(repo)) return { tech: 'mysql', kind: 'mysql' };
   if (/^(mongo|bitnami\/mongodb|mongodb\/mongodb-community-server)$/.test(repo)) return { tech: 'mongodb', kind: 'mongodb' };
   if (/^(redis|redis\/redis-stack[\w-]*|bitnami\/redis|eqalpha\/keydb|redislabs\/[\w-]+|redis\/[\w-]+)$/.test(repo)) return { tech: 'redis', kind: 'redis' };
-  if (/^(valkey\/valkey|bitnami\/valkey)$/.test(repo)) return { tech: 'valkey', kind: 'redis' };
+  if (/^(valkey\/valkey|valkey-io\/valkey|bitnami\/valkey)$/.test(repo)) return { tech: 'valkey', kind: 'redis' };
   if (/^(memcached|bitnami\/memcached)$/.test(repo)) return { tech: 'memcached', kind: 'memcached' };
   if (/^(rabbitmq|bitnami\/rabbitmq)$/.test(repo)) return { tech: 'rabbitmq', kind: 'rabbitmq' };
   if (/^(confluentinc\/cp-kafka|confluentinc\/cp-server|bitnami\/kafka|apache\/kafka[\w-]*|wurstmeister\/kafka|ubuntu\/kafka)$/.test(repo)) return { tech: 'kafka', kind: 'kafka' };
@@ -150,10 +176,11 @@ export function matchImage(image: string): ImageMatch {
   if (/^(nginx|nginxinc\/[\w-]+|bitnami\/nginx)$/.test(repo)) return { tech: 'nginx' };
   if (/^(haproxy|haproxytech\/haproxy[\w-]*)$/.test(repo)) return { tech: 'haproxy' };
   if (/^traefik$/.test(repo)) return { tech: 'nginx', note: 'Traefik is modeled as Nginx (a similar reverse proxy).' };
+  if (/^envoyproxy\/envoy[\w-]*$/.test(repo)) return { tech: 'nginx', note: 'Envoy is modeled as Nginx (a similar proxy).' };
   if (/^caddy$/.test(repo)) return { tech: 'nginx', note: 'Caddy is modeled as Nginx (a similar reverse proxy).' };
   if (/^(kong|kong\/kong-gateway)$/.test(repo)) return { tech: 'kong' };
   if (/^(minio\/minio|bitnami\/minio)$/.test(repo)) return { tech: 'aws-s3', kind: 's3', note: 'MinIO is modeled as S3 (it speaks the same API).' };
-  if (/elasticsearch|opensearch|cassandra|scylla|clickhouse|neo4j|qdrant|weaviate|milvus|nats|pulsar|keycloak|vault|consul|etcd/.test(repo)) {
+  if (/elasticsearch|opensearch|cassandra|flagd|unleash|growthbook|minio\/mc|scylla|clickhouse|neo4j|qdrant|weaviate|milvus|nats|pulsar|keycloak|vault|consul|etcd/.test(repo)) {
     return { skip: "not in ScaleLab's catalog yet" };
   }
   return {};
@@ -172,6 +199,32 @@ export function matchServiceName(name: string): ImageMatch {
   if (/^(kafka|broker)$/.test(n)) return { tech: 'kafka', kind: 'kafka' };
   if (/^rabbit(mq)?$/.test(n)) return { tech: 'rabbitmq', kind: 'rabbitmq' };
   return {};
+}
+
+/** The language a Dockerfile's base image is for, when we can tell. */
+export function languageOfImage(image: string): string | undefined {
+  const repo = image.split('@')[0]!.replace(/:[^/]*$/, '').toLowerCase().split('/').pop()!;
+  const known: Array<[RegExp, string]> = [
+    [/^ruby/, 'Ruby'],
+    [/^rust/, 'Rust'],
+    [/^php/, 'PHP'],
+    [/^(gcc|clang)/, 'C++'],
+    [/^elixir/, 'Elixir'],
+    [/^(erlang)/, 'Erlang'],
+    [/^(swift)/, 'Swift'],
+    [/^(dart)/, 'Dart'],
+    [/^(node)/, 'Node.js'],
+    [/^(python)/, 'Python'],
+    [/^(golang)/, 'Go'],
+    [/^(eclipse-temurin|openjdk|amazoncorretto|gradle|maven)/, 'Java'],
+    [/^(dotnet|aspnet|sdk|runtime)$/, '.NET'],
+  ];
+  return known.find(([re]) => re.test(repo))?.[1];
+}
+
+/** All base images in a Dockerfile, first stage first. */
+export function dockerfileImages(text: string): string[] {
+  return [...text.matchAll(/^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)/gim)].map((m) => m[1]!);
 }
 
 /** The base image of the final stage of a Dockerfile: "FROM nginx:1.27 AS web" → "nginx:1.27". */

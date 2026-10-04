@@ -1,5 +1,6 @@
 import type {
   Archetype,
+  QueueConfig,
   CacheConfig,
   ComputeConfig,
   Distribution,
@@ -26,6 +27,9 @@ export const SIMULATED_ARCHETYPES: readonly Archetype[] = [
   'compute-service',
   'cache',
   'relational-db',
+  'message-queue',
+  'event-stream',
+  'worker',
 ];
 
 export const isSimulated = (archetype: Archetype): boolean => SIMULATED_ARCHETYPES.includes(archetype);
@@ -95,6 +99,22 @@ export function relationalDbConfig(c: {
     queueLimit: c.queueLimit ?? 500,
     timeoutMs: c.timeoutMs ?? 3000,
     readReplicas: 0,
+  };
+}
+
+export function queueConfig(c: {
+  publishLatency: Distribution;
+  maxBacklog?: number;
+  partitions?: number;
+  fanOut?: boolean;
+}): QueueConfig {
+  return {
+    type: 'queue',
+    ...healthy,
+    maxBacklog: c.maxBacklog ?? 100_000,
+    publishLatency: c.publishLatency,
+    partitions: c.partitions ?? 0,
+    fanOut: c.fanOut ?? false,
   };
 }
 

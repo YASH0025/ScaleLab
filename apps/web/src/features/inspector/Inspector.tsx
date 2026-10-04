@@ -113,6 +113,32 @@ function ConfigFields({ node }: { node: ArchNode }) {
           <NumberField label="Timeout" value={c.timeoutMs} min={10} step={100} suffix="ms" onChange={(v) => set({ ...c, timeoutMs: v })} />
         </>
       );
+    case 'queue':
+      return (
+        <>
+          <label className="flex items-center justify-between gap-3 py-1.5 text-[13px]">
+            <span className="text-muted">Delivery</span>
+            <select
+              value={c.fanOut ? 'fanout' : 'compete'}
+              onChange={(e) => set({ ...c, fanOut: e.target.value === 'fanout' })}
+              className="rounded-md border border-line-strong bg-bg px-2 py-1 text-[12px] outline-none focus:border-accent"
+            >
+              <option value="fanout">Every consumer gets every message</option>
+              <option value="compete">Consumers share the work</option>
+            </select>
+          </label>
+          {c.fanOut && (
+            <NumberField label="Partitions" value={c.partitions} min={0} max={1000} onChange={(v) => set({ ...c, partitions: Math.round(v) })} />
+          )}
+          <NumberField label="Max backlog" value={c.maxBacklog} min={1} step={1000} onChange={(v) => set({ ...c, maxBacklog: Math.round(v) })} />
+          <NumberField label="Publish latency" value={meanOf(c.publishLatency)} min={0.1} step={0.5} suffix="ms" onChange={(v) => set({ ...c, publishLatency: withMean(c.publishLatency, v) })} />
+          <p className="mt-2 text-[11px] leading-relaxed text-faint">
+            {c.fanOut
+              ? 'Each consumer processes at most one message per partition at a time. Partitions cap parallelism.'
+              : 'Producers don’t wait for consumers. When the backlog is full, publishing fails.'}
+          </p>
+        </>
+      );
     case 'client':
       return <p className="text-[13px] leading-relaxed text-muted">Sends the traffic you set in the toolbar. Connect it to a load balancer or a backend.</p>;
     case 'generic':
@@ -191,7 +217,7 @@ function Failures({ node }: { node: ArchNode }) {
   const inject = useSim((s) => s.inject);
   const live = status === 'running' || status === 'paused';
   const c = node.config;
-  if (c.type !== 'compute' && c.type !== 'cache' && c.type !== 'relational-db') return null;
+  if (c.type !== 'compute' && c.type !== 'cache' && c.type !== 'relational-db' && c.type !== 'queue') return null;
   const btn = 'rounded-lg border px-2.5 py-1.5 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40';
 
   return (
@@ -243,7 +269,7 @@ function Overview() {
       <h2 className="text-[15px] font-semibold">Your architecture</h2>
       <p className="mt-1 text-[13px] leading-relaxed text-muted">
         {nodes.length === 0
-          ? 'Drag technologies from the left and connect them top to bottom: client → load balancer → backend → cache and database.'
+          ? 'Drag technologies from the left and connect them top to bottom: client → load balancer → services → cache and database. Services can call other services and publish to queues that workers consume.'
           : `${nodes.length} components. Select one to tune it, attach libraries, or break it during a run.`}
       </p>
       {hints.map((h) => (

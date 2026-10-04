@@ -4,7 +4,7 @@ import { getLibrary, getTechnology } from '@scalelab/catalog';
 import { type ArchNode, archetypeName } from '@scalelab/model';
 import { Handle, type Node, type NodeProps, Position } from '@xyflow/react';
 import { memo } from 'react';
-import { type Health, healthOf } from '@/lib/findings';
+import { type Health, LAG_HOT_MS, healthOfSample } from '@/lib/findings';
 import { TechIcon } from '@/lib/tech-icon';
 import { useSim } from '@/store/use-sim';
 
@@ -18,6 +18,9 @@ const BORDER: Record<Health, string> = {
   hot: 'border-bad',
   down: 'border-line-strong',
 };
+const lag = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 1000)} s`);
+const compact = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n.toLocaleString());
+
 const BAR: Record<Health, string> = {
   idle: 'bg-line-strong',
   ok: 'bg-ok',
@@ -33,8 +36,11 @@ function TechNodeView({ data }: NodeProps<TechFlowNode>) {
   const running = useSim((s) => s.status !== 'idle');
   if (!tech) return null;
 
-  const health: Health = live ? healthOf(live.utilization, live.up) : 'idle';
+  const health: Health = healthOfSample(live, tech.archetype);
   const isClient = tech.archetype === 'client';
+  const isQueue = arch.config.type === 'queue';
+  /** Queues fill their bar by consumer lag (full at the "falling behind" mark); everything else by utilization. */
+  const barPct = isQueue ? Math.min(100, ((live?.lagMs ?? 0) / LAG_HOT_MS) * 100) : (live?.utilization ?? 0) * 100;
   const instances = arch.config.type === 'compute' ? arch.config.instances : undefined;
   const util = live ? Math.round(live.utilization * 100) : undefined;
 
@@ -65,11 +71,21 @@ function TechNodeView({ data }: NodeProps<TechFlowNode>) {
       {running && live && (
         <div className="mt-3">
           <div className="h-1.5 overflow-hidden rounded-full bg-raised">
-            <div className={`h-full rounded-full transition-[width] duration-300 ${BAR[health]}`} style={{ width: `${util ?? 0}%` }} />
+            <div className={`h-full rounded-full transition-[width] duration-300 ${BAR[health]}`} style={{ width: `${barPct}%` }} />
           </div>
           <div className="mt-1.5 flex items-center gap-2 font-mono text-[11px] text-muted">
             {health === 'down' ? (
               <span className="text-bad-soft">down</span>
+            ) : isQueue ? (
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className={`whitespace-nowrap ${health === 'hot' ? 'text-bad-soft' : ''}`}>
+                  <span title="Messages waiting">{compact(live.queueLength)} waiting</span>
+                  <span title="Age of the oldest waiting message"> · lag {lag(live.lagMs ?? 0)}</span>
+                </span>
+                <span className="whitespace-nowrap text-faint" title="Messages published and processed per second">
+                  in {compact(live.servedPerSec)}/s · out {compact(live.consumedPerSec ?? 0)}/s
+                </span>
+              </span>
             ) : (
               <>
                 <span className={health === 'hot' ? 'text-bad-soft' : ''}>{util ?? 0}%</span>

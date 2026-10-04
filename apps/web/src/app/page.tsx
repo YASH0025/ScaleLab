@@ -38,6 +38,12 @@ export default function Home() {
               ▶ Try the e-commerce example
             </Link>
             <Link
+              href="/play?template=microservices"
+              className="rounded-xl border border-line-strong bg-card px-5 py-3 text-[15px] transition hover:bg-raised"
+            >
+              Microservices + Kafka example
+            </Link>
+            <Link
               href="/play?template=blank"
               className="rounded-xl border border-line-strong bg-card px-5 py-3 text-[15px] transition hover:bg-raised"
             >

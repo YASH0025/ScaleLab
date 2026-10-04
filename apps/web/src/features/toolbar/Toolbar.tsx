@@ -1,6 +1,6 @@
 'use client';
 
-import { shopSphere } from '@scalelab/templates';
+import { microShop, shopSphere } from '@scalelab/templates';
 import { useState } from 'react';
 import { ShareButton } from '@/features/share/ShareButton';
 import { clearDesign, loadDesign, renameDesign } from '@/store/design-doc';
@@ -115,6 +115,17 @@ export function Toolbar() {
               }}
             >
               Load ShopSphere example
+            </button>
+            <button
+              className="w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-raised"
+              onClick={() => {
+                reset();
+                select(undefined);
+                loadDesign(microShop());
+                setMenuOpen(false);
+              }}
+            >
+              Load microservices example
             </button>
             <button
               className="w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-raised"

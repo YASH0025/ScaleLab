@@ -19,6 +19,9 @@ const CONFIG_TYPE: Partial<Record<Archetype, ArchetypeConfig['type']>> = {
   'compute-service': 'compute',
   cache: 'cache',
   'relational-db': 'relational-db',
+  worker: 'compute',
+  'message-queue': 'queue',
+  'event-stream': 'queue',
 };
 
 export function expectedConfigType(archetype: Archetype): ArchetypeConfig['type'] {
@@ -31,6 +34,10 @@ function collectFlowNodeIds(steps: FlowStep[], out: string[]): void {
       case 'call':
       case 'publish':
         out.push(step.nodeId);
+        break;
+      case 'service-call':
+        out.push(step.nodeId);
+        collectFlowNodeIds(step.steps, out);
         break;
       case 'cache-lookup':
         out.push(step.cacheNodeId);
@@ -147,6 +154,29 @@ export function validateDesign(input: unknown, resolveArchetype: ArchetypeResolv
           message: `Flow "${flow.name}" uses node "${nodeId}", which doesn't exist.`,
         });
       }
+    }
+  }
+
+  const QUEUES: Archetype[] = ['message-queue', 'event-stream'];
+  for (const handler of design.handlers ?? []) {
+    const referenced: string[] = [handler.queueNodeId, handler.consumerNodeId];
+    collectFlowNodeIds(handler.steps, referenced);
+    for (const nodeId of referenced) {
+      if (!archetypes.has(nodeId)) {
+        issues.push({
+          severity: 'error',
+          targetId: handler.id,
+          message: `Message handler "${handler.id}" uses node "${nodeId}", which doesn't exist.`,
+        });
+      }
+    }
+    const queueKind = archetypes.get(handler.queueNodeId);
+    if (queueKind && !QUEUES.includes(queueKind)) {
+      issues.push({
+        severity: 'error',
+        targetId: handler.id,
+        message: `Message handler "${handler.id}" reads from "${handler.queueNodeId}", which is not a queue or stream.`,
+      });
     }
   }
 

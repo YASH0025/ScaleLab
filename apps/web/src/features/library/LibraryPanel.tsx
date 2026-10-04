@@ -20,6 +20,7 @@ const CATEGORY_LABEL: Partial<Record<Category, string>> = {
   'object-storage': 'Storage',
   'message-queue': 'Queues',
   'event-stream': 'Streaming',
+  worker: 'Workers',
   external: 'External APIs',
   infrastructure: 'Infrastructure',
 };
@@ -31,12 +32,13 @@ const ORDER: Category[] = [
   'backend',
   'cache',
   'relational-db',
+  'message-queue',
+  'event-stream',
+  'worker',
   'document-db',
   'dns-edge',
   'gateway',
   'object-storage',
-  'message-queue',
-  'event-stream',
   'external',
   'infrastructure',
 ];

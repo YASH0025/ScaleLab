@@ -14,6 +14,8 @@ const BLUE = '#5b9cff';
 const GREEN = '#4ade80';
 const ORANGE = '#f5a524';
 const RED = '#ff5a5a';
+const PURPLE = '#b48cff';
+const QUEUES = ['message-queue', 'event-stream'];
 
 /** How many packets to draw for a given rate: log-scaled so 50 and 5,000 rps both read well. */
 function packetCount(rps: number): number {
@@ -41,7 +43,17 @@ function FlowEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, 
   const running = useSim((s) => s.status === 'running');
 
   const targetKind = getTechnology(targetTechId ?? '')?.archetype;
-  const color = targetDown ? RED : targetKind === 'cache' ? GREEN : targetKind === 'relational-db' ? ORANGE : BLUE;
+  const sourceKind = getTechnology(sourceTechId ?? '')?.archetype;
+  const messaging = QUEUES.includes(targetKind ?? '') || QUEUES.includes(sourceKind ?? '');
+  const color = targetDown
+    ? RED
+    : messaging
+      ? PURPLE
+      : targetKind === 'cache'
+        ? GREEN
+        : targetKind === 'relational-db'
+          ? ORANGE
+          : BLUE;
   const count = packetCount(rate);
   const width = rate > 0 ? Math.min(6, 1.5 + Math.log10(rate + 1)) : 1.5;
   const duration = 1.6;

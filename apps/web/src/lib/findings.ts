@@ -1,5 +1,5 @@
 import { getTechnology } from '@scalelab/catalog';
-import type { EngineMetricsSample } from '@scalelab/engine';
+import type { EngineMetricsSample, EngineNodeSample } from '@scalelab/engine';
 import type { ArchEdge, ArchNode, Archetype } from '@scalelab/model';
 
 export interface Bottleneck {
@@ -12,20 +12,40 @@ export interface Bottleneck {
   suggestions: string[];
 }
 
-/** How deep a component sits in the request path. Deeper saturation is the root cause. */
+/**
+ * How deep a component sits in the request path. Deeper saturation is the root cause:
+ * when a database saturates, the services waiting on it look busy too.
+ * A lagging queue ranks just above its consumers, and below the data stores they use.
+ */
 const DEPTH: Partial<Record<Archetype, number>> = {
   'load-balancer': 1,
   'compute-service': 2,
+  worker: 2,
+  'message-queue': 2.5,
+  'event-stream': 2.5,
   cache: 3,
   'relational-db': 3,
 };
 
 export const HOT = 0.9;
+/** Consumer lag at which a queue counts as falling behind. */
+export const LAG_HOT_MS = 5000;
+export const LAG_WARM_MS = 1000;
+
+const QUEUES: Archetype[] = ['message-queue', 'event-stream'];
+const isQueue = (a: Archetype | undefined) => a !== undefined && QUEUES.includes(a);
+
+/** Queues are in trouble when consumers fall behind or the backlog fills; everything else by utilization. */
+function pressure(s: EngineNodeSample, archetype: Archetype): number {
+  if (isQueue(archetype) && (s.lagMs ?? 0) >= LAG_HOT_MS) return Math.max(HOT, s.utilization);
+  return s.utilization;
+}
+
+const seconds = (ms: number) => (ms >= 10_000 ? `${Math.round(ms / 1000)} s` : `${(ms / 1000).toFixed(1)} s`);
 
 /**
- * Picks the component most likely limiting throughput: the deepest one that is
- * saturated. When a database saturates, backends also look busy because their
- * threads wait on it, so the database is the real cause.
+ * Picks the component most likely limiting the system: the deepest one under pressure,
+ * and explains it with the evidence behind it.
  */
 export function findBottleneck(
   sample: EngineMetricsSample | undefined,
@@ -34,29 +54,35 @@ export function findBottleneck(
 ): Bottleneck | undefined {
   if (!sample) return undefined;
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  let best: { node: ArchNode; archetype: Archetype; util: number; queue: number } | undefined;
+  const archetypeOf = (id: string) => {
+    const n = byId.get(id);
+    return n ? getTechnology(n.technologyId)?.archetype : undefined;
+  };
+  let best: { node: ArchNode; archetype: Archetype; util: number; s: EngineNodeSample } | undefined;
   for (const s of sample.nodes) {
-    if (s.utilization < HOT) continue;
     const node = byId.get(s.nodeId);
-    const archetype = node && getTechnology(node.technologyId)?.archetype;
+    const archetype = archetypeOf(s.nodeId);
     if (!node || !archetype) continue;
+    const util = pressure(s, archetype);
+    if (util < HOT) continue;
     const depth = DEPTH[archetype] ?? 0;
     const bestDepth = best ? (DEPTH[best.archetype] ?? 0) : -1;
-    if (!best || depth > bestDepth || (depth === bestDepth && s.utilization > best.util)) {
-      best = { node, archetype, util: s.utilization, queue: s.queueLength };
+    if (!best || depth > bestDepth || (depth === bestDepth && util > best.util)) {
+      best = { node, archetype, util, s };
     }
   }
   if (!best) return undefined;
 
   const pct = Math.round(best.util * 100);
+  const queue = best.s.queueLength;
   const hasCache = nodes.some((n) => getTechnology(n.technologyId)?.archetype === 'cache') && edges.length > 0;
-  const base = { nodeId: best.node.id, label: best.node.label, archetype: best.archetype, utilization: best.util, queueLength: best.queue };
+  const base = { nodeId: best.node.id, label: best.node.label, archetype: best.archetype, utilization: best.util, queueLength: queue };
 
   switch (best.archetype) {
     case 'relational-db':
       return {
         ...base,
-        explanation: `Connection pool at ${pct}% with ${best.queue} requests waiting. Adding backend instances will increase database pressure without raising throughput.`,
+        explanation: `Connection pool at ${pct}% with ${queue} requests waiting. Adding backend instances will increase database pressure without raising throughput.`,
         suggestions: hasCache
           ? ['Raise the cache hit ratio', 'Add a read replica', 'Raise the connection pool']
           : ['Add Redis in front', 'Add a read replica', 'Raise the connection pool'],
@@ -70,9 +96,18 @@ export function findBottleneck(
     case 'compute-service':
       return {
         ...base,
-        explanation: `Workers at ${pct}% with ${best.queue} requests waiting. The backend can't keep up with incoming traffic.`,
+        explanation: `Workers at ${pct}% with ${queue} requests waiting. The service can't keep up, and every service calling it slows down too.`,
         suggestions: ['Add instances', 'Add workers per instance', 'Reduce service time'],
       };
+    case 'worker':
+      return {
+        ...base,
+        explanation: `Workers at ${pct}% busy processing messages. Work is arriving faster than it can be done.`,
+        suggestions: ['Add instances', 'Add workers per instance', 'Reduce service time'],
+      };
+    case 'message-queue':
+    case 'event-stream':
+      return { ...base, ...explainQueue(best.node, best.s, sample, edges, byId, archetypeOf) };
     default:
       return {
         ...base,
@@ -80,6 +115,49 @@ export function findBottleneck(
         suggestions: [],
       };
   }
+}
+
+/** Why a queue is falling behind: no consumers, a partition cap, or busy consumers. */
+function explainQueue(
+  queueNode: ArchNode,
+  s: EngineNodeSample,
+  sample: EngineMetricsSample,
+  edges: ArchEdge[],
+  byId: Map<string, ArchNode>,
+  archetypeOf: (id: string) => Archetype | undefined,
+): { explanation: string; suggestions: string[] } {
+  const waiting = `${s.queueLength.toLocaleString()} messages waiting${s.lagMs ? `, the oldest for ${seconds(s.lagMs)}` : ''}`;
+  const filling = s.utilization >= HOT ? ' The backlog is almost full, so publishing will start to fail.' : ' Requests still succeed, but the work they triggered is delayed.';
+  const consumers = edges
+    .filter((e) => e.source === queueNode.id && ['worker', 'compute-service'].includes(archetypeOf(e.target) ?? ''))
+    .map((e) => byId.get(e.target)!)
+    .filter(Boolean);
+  if (consumers.length === 0) {
+    return {
+      explanation: `Nothing consumes from ${queueNode.label}: ${waiting}.${filling}`,
+      suggestions: ['Connect a worker'],
+    };
+  }
+  const partitions = queueNode.config.type === 'queue' ? queueNode.config.partitions : 0;
+  const busiest = consumers
+    .map((c) => ({ node: c, util: sample.nodes.find((n) => n.nodeId === c.id)?.utilization ?? 0 }))
+    .sort((a, b) => b.util - a.util)[0]!;
+  const workers = (n: ArchNode) => (n.config.type === 'compute' ? n.config.instances * n.config.workersPerInstance : 0);
+  const capped = partitions > 0 && consumers.some((c) => workers(c) > partitions) && busiest.util < HOT;
+
+  if (capped) {
+    return {
+      explanation: `Consumers are falling behind: ${waiting}. ${queueNode.label} has ${partitions} partitions, so each consumer group processes only ${partitions} messages at a time. Adding consumer instances won't help until you add partitions.${filling}`,
+      suggestions: ['Add partitions', 'Reduce consumer service time'],
+    };
+  }
+  return {
+    explanation: `Consumers are falling behind: ${waiting}. ${busiest.node.label} is ${Math.round(busiest.util * 100)}% busy.${filling}`,
+    suggestions:
+      partitions > 0 && consumers.some((c) => workers(c) >= partitions)
+        ? ['Add partitions and consumer instances', 'Reduce consumer service time']
+        : ['Add consumer instances', 'Add workers per instance', 'Reduce consumer service time'],
+  };
 }
 
 export type Health = 'idle' | 'ok' | 'warm' | 'hot' | 'down';
@@ -90,4 +168,17 @@ export function healthOf(utilization: number | undefined, up = true): Health {
   if (utilization >= HOT) return 'hot';
   if (utilization >= 0.7) return 'warm';
   return 'ok';
+}
+
+/** Health of a live node sample; queues are judged by consumer lag as well as backlog fullness. */
+export function healthOfSample(s: EngineNodeSample | undefined, archetype: Archetype | undefined): Health {
+  if (!s) return 'idle';
+  if (!s.up) return 'down';
+  if (isQueue(archetype)) {
+    const lag = s.lagMs ?? 0;
+    if (lag >= LAG_HOT_MS || s.utilization >= HOT) return 'hot';
+    if (lag >= LAG_WARM_MS || s.utilization >= 0.7) return 'warm';
+    return 'ok';
+  }
+  return healthOf(s.utilization, s.up);
 }

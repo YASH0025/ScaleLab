@@ -9,8 +9,10 @@ import type {
   FlowStep,
   LibraryEffect,
   LoadBalancerConfig,
+  MessageHandler,
   MetricsSample,
   NodeMetricsSample,
+  QueueConfig,
   RelationalDbConfig,
   RequestStatus,
   RequestTrace,
@@ -63,6 +65,12 @@ export interface EngineNodeSample extends NodeMetricsSample {
   up: boolean;
   /** Per-instance detail for backends with several instances. */
   instances?: InstanceSample[];
+  /** Queues and streams: messages consumers finished this second. */
+  consumedPerSec?: number;
+  /** Queues and streams: age of the oldest waiting message (consumer lag). */
+  lagMs?: number;
+  /** Queues and streams: messages given up on after repeated failures, so far. */
+  deadLettered?: number;
 }
 
 export interface EngineMetricsSample extends MetricsSample {
@@ -79,6 +87,8 @@ export interface NodeSummary {
   maxQueueLength: number;
   avgWaitMs: number;
   served: number;
+  /** Queues and streams only. */
+  maxLagMs?: number;
 }
 
 export interface SimulationTotals {
@@ -100,6 +110,9 @@ export interface SimulationTotals {
   peakThroughputRps: number;
   /** Failed share of finished requests, 0..1. */
   errorRate: number;
+  messagesPublished: number;
+  messagesConsumed: number;
+  messagesDeadLettered: number;
 }
 
 export interface SimulationResult {
@@ -127,7 +140,38 @@ type RuntimeNode =
   | (Base & { kind: 'compute'; config: ComputeConfig; instances: Resource[]; overheadMs: number; auth: Distribution[] })
   | (Base & { kind: 'cache'; config: CacheConfig; pool: Resource; hits: number; misses: number })
   | (Base & { kind: 'db'; config: RelationalDbConfig; primary: Resource; replicas: Resource[] })
+  | (Base & { kind: 'queue'; config: QueueConfig; groups: QueueGroup[]; published: number; deadLettered: number })
   | (Base & { kind: 'passthrough' });
+
+interface Message {
+  /** When it was first published; lag is measured from here, even after retries. */
+  at: number;
+  attempts: number;
+}
+
+interface PreparedHandler {
+  handler: MessageHandler;
+  flow: PreparedFlow;
+}
+
+/**
+ * One backlog of messages. Competing consumers share one group; with fan-out,
+ * each consumer gets its own group (its own copy of every message).
+ */
+interface QueueGroup {
+  queueId: string;
+  handlers: PreparedHandler[];
+  buffer: Message[];
+  head: number;
+  inflight: number;
+  consumedThisSecond: number;
+}
+
+const emptyAgg = () => ({ utilSum: 0, utilPeak: 0, maxQueue: 0, waitSum: 0, waitCount: 0, served: 0, samples: 0, maxLagMs: 0 });
+
+/** Redeliveries before a message is dead-lettered. */
+const MAX_DELIVERIES = 3;
+const REDELIVERY_DELAY_MS = 1000;
 
 interface PreparedFlow {
   flow: ApiFlow;
@@ -144,6 +188,8 @@ interface Req {
   attempt: number;
   traced: boolean;
   spans: TraceSpan[];
+  /** Set when this is a consumer processing a message, not a user request. */
+  job?: { group: QueueGroup; message: Message };
 }
 
 interface Attempt {
@@ -206,7 +252,14 @@ export class Simulation implements Clock {
   private readonly timeline: EngineMetricsSample[] = [];
   private readonly traces: RequestTrace[] = [];
   private readonly servedCounts = new Map<Resource, number>();
-  private readonly nodeAgg = new Map<string, { utilSum: number; utilPeak: number; maxQueue: number; waitSum: number; waitCount: number; served: number; samples: number }>();
+  private readonly nodeAgg = new Map<
+    string,
+    { utilSum: number; utilPeak: number; maxQueue: number; waitSum: number; waitCount: number; served: number; samples: number; maxLagMs: number }
+  >();
+  private readonly groups: QueueGroup[] = [];
+  private messagesPublished = 0;
+  private messagesConsumed = 0;
+  private messagesDeadLettered = 0;
   private readonly totals = {
     arrivals: 0,
     ok: 0,
@@ -248,6 +301,7 @@ export class Simulation implements Clock {
       });
     }
     this.totalWeight = this.flows.reduce((sum, f) => sum + f.weight, 0);
+    this.buildGroups(design.handlers ?? []);
 
     for (const change of options.changes ?? []) {
       this.events.push(change.atSec * 1000, () => this.applyChange(change));
@@ -328,6 +382,9 @@ export class Simulation implements Clock {
         meanMs: round(latency.mean),
         peakThroughputRps: this.timeline.reduce((max, s) => Math.max(max, s.throughputRps), 0),
         errorRate: finishedCount === 0 ? 0 : round(failed / finishedCount, 4),
+        messagesPublished: this.messagesPublished,
+        messagesConsumed: this.messagesConsumed,
+        messagesDeadLettered: this.messagesDeadLettered,
       },
       nodes: [...this.nodeAgg.entries()].map(([nodeId, a]) => ({
         nodeId,
@@ -336,6 +393,7 @@ export class Simulation implements Clock {
         maxQueueLength: a.maxQueue,
         avgWaitMs: a.waitCount === 0 ? 0 : round(a.waitSum / a.waitCount),
         served: a.served,
+        ...(this.nodes.get(nodeId)?.kind === 'queue' ? { maxLagMs: round(a.maxLagMs) } : {}),
       })),
       traces: this.traces,
       warnings: [...this.warnings],
@@ -391,8 +449,47 @@ export class Simulation implements Clock {
             pool(`/replica-${i + 1}`, c.connectionPool, c.queueLimit, c.timeoutMs),
           ),
         };
+      case 'queue':
+        return { ...base, kind: 'queue', config: c, groups: [], published: 0, deadLettered: 0 };
       case 'generic':
         return { ...base, kind: 'passthrough' };
+    }
+  }
+
+  /** Wires consumers to queues. Every queue gets at least one group so unconsumed messages pile up. */
+  private buildGroups(handlers: MessageHandler[]): void {
+    const byQueue = new Map<string, PreparedHandler[]>();
+    for (const handler of handlers) {
+      const queue = this.nodes.get(handler.queueNodeId);
+      if (queue?.kind !== 'queue') {
+        this.warnings.add(`"${handler.queueNodeId}" is not a simulated queue; its consumer is ignored.`);
+        continue;
+      }
+      const flow: ApiFlow = {
+        id: handler.id,
+        name: handler.id,
+        method: 'POST',
+        path: '/message',
+        entryNodeId: handler.consumerNodeId,
+        steps: handler.steps,
+        retry: { attempts: 0, backoffMs: 0 },
+      };
+      this.assertNodes(flow);
+      const prepared: PreparedHandler = {
+        handler,
+        flow: { flow, weight: 0, clientId: undefined, firstCompute: handler.consumerNodeId },
+      };
+      byQueue.set(handler.queueNodeId, [...(byQueue.get(handler.queueNodeId) ?? []), prepared]);
+    }
+    for (const node of this.nodes.values()) {
+      if (node.kind !== 'queue') continue;
+      const handlersHere = byQueue.get(node.node.id) ?? [];
+      const sets = node.config.fanOut && handlersHere.length > 0 ? handlersHere.map((h) => [h]) : [handlersHere];
+      for (const set of sets) {
+        const group: QueueGroup = { queueId: node.node.id, handlers: set, buffer: [], head: 0, inflight: 0, consumedThisSecond: 0 };
+        node.groups.push(group);
+        this.groups.push(group);
+      }
     }
   }
 
@@ -402,6 +499,9 @@ export class Simulation implements Clock {
       for (const s of steps) {
         if (s.kind === 'call' || s.kind === 'publish') {
           if (!this.nodes.has(s.nodeId)) missing.push(s.nodeId);
+        } else if (s.kind === 'service-call') {
+          if (!this.nodes.has(s.nodeId)) missing.push(s.nodeId);
+          visit(s.steps);
         } else if (s.kind === 'cache-lookup') {
           if (!this.nodes.has(s.cacheNodeId)) missing.push(s.cacheNodeId);
           visit(s.onHit);
@@ -538,6 +638,8 @@ export class Simulation implements Clock {
         return next();
       case 'call':
         return this.call(att, step.nodeId, step.operation, next);
+      case 'service-call':
+        return this.serviceCall(att, step, next);
       case 'cache-lookup':
         return this.cacheLookup(att, step, next);
       case 'parallel': {
@@ -550,12 +652,164 @@ export class Simulation implements Clock {
         }
         return;
       }
-      case 'publish': {
-        this.warnings.add('Publishing to queues and streams is not simulated yet; it only adds network latency.');
-        const lat = this.hopLatency(att.location, step.nodeId);
-        return this.schedule(lat, () => this.continueIfAlive(att, next));
-      }
+      case 'publish':
+        return this.publish(att, step.nodeId, next);
     }
+  }
+
+  /**
+   * A synchronous call to another service. The callee takes one of its workers,
+   * does its work and its own dependencies, then frees the worker and replies.
+   * The caller keeps its own worker busy the whole time (thread-per-request).
+   */
+  private serviceCall(att: Attempt, step: Extract<FlowStep, { kind: 'service-call' }>, next: () => void): void {
+    const node = this.nodes.get(step.nodeId)!;
+    const caller = att.location;
+    if (node.kind !== 'compute') {
+      this.warnings.add(`"${node.node.label}" is not a simulated service; the call only adds network latency.`);
+      const lat = this.hopLatency(caller, step.nodeId) * 2;
+      return this.schedule(lat, () => this.continueIfAlive(att, () => this.runSteps(att, step.steps, 0, next)));
+    }
+    const doWork = (afterWork: () => void) => {
+      let workMs = sample(this.serviceRng, node.config.serviceTime) + node.overheadMs + node.extraLatencyMs;
+      for (const auth of node.auth) workMs += sample(this.serviceRng, auth);
+      this.span(att, step.nodeId, 0, workMs, 'complete');
+      this.schedule(workMs, () => this.continueIfAlive(att, afterWork));
+    };
+    // Re-entrant call to a service this request already occupies: no new worker.
+    if (att.held.has(step.nodeId)) {
+      return doWork(() => this.runSteps(att, step.steps, 0, next));
+    }
+    const instance = this.chooseInstance(node.instances);
+    if (!instance) return this.fail(att, 'error', 503, step.nodeId);
+    this.schedule(this.hopLatency(caller, step.nodeId), () => {
+      if (att.dead) return;
+      const requestedAt = this.clock;
+      instance.acquire(
+        (lease, waitMs) => {
+          this.countServed(instance);
+          if (att.dead) return instance.release(lease);
+          att.held.set(step.nodeId, lease);
+          att.leases.push(lease);
+          att.location = step.nodeId;
+          this.span(att, instance.id, waitMs, 0, 'complete', requestedAt);
+          doWork(() =>
+            this.runSteps(att, step.steps, 0, () => {
+              // The callee is done: free its worker and reply to the caller.
+              att.held.delete(step.nodeId);
+              att.leases = att.leases.filter((l) => l !== lease);
+              instance.release(lease);
+              att.location = caller;
+              this.schedule(this.hopLatency(step.nodeId, caller), () => this.continueIfAlive(att, next));
+            }),
+          );
+        },
+        (reason) => this.failFromAcquire(att, reason, instance.id),
+      );
+    });
+  }
+
+  /**
+   * Hands a message to a queue or stream. The producer waits only for the broker's
+   * acknowledgement, never for consumers. A full backlog pushes back by rejecting.
+   */
+  private publish(att: Attempt, queueId: string, next: () => void): void {
+    const node = this.nodes.get(queueId)!;
+    const from = att.location;
+    if (node.kind !== 'queue') {
+      this.warnings.add(`"${node.node.label}" is not a simulated queue; publishing to it only adds network latency.`);
+      return this.schedule(this.hopLatency(from, queueId) * 2, () => this.continueIfAlive(att, next));
+    }
+    this.schedule(this.hopLatency(from, queueId), () => {
+      if (att.dead) return;
+      if (!node.up) return this.fail(att, 'error', 503, queueId);
+      if (node.groups.some((g) => g.buffer.length - g.head >= node.config.maxBacklog)) {
+        return this.fail(att, 'rejected', 503, queueId);
+      }
+      const ackMs = sample(this.serviceRng, node.config.publishLatency) + node.extraLatencyMs;
+      this.span(att, queueId, 0, ackMs, 'complete');
+      for (const group of node.groups) {
+        group.buffer.push({ at: this.clock, attempts: 0 });
+        this.dispatch(group);
+      }
+      node.published++;
+      this.messagesPublished++;
+      this.schedule(ackMs + this.hopLatency(queueId, from), () => this.continueIfAlive(att, next));
+    });
+  }
+
+  /** Hands waiting messages to consumers while they have free capacity. */
+  private dispatch(group: QueueGroup): void {
+    const queue = this.nodes.get(group.queueId);
+    if (queue?.kind !== 'queue' || !queue.up || group.handlers.length === 0) return;
+    for (;;) {
+      if (group.buffer.length - group.head <= 0) break;
+      let capacity = 0;
+      let best: { handler: PreparedHandler; instance: Resource; load: number } | undefined;
+      for (const handler of group.handlers) {
+        const consumer = this.nodes.get(handler.handler.consumerNodeId);
+        if (consumer?.kind !== 'compute') continue;
+        for (const instance of consumer.instances) {
+          if (!instance.up) continue;
+          capacity += instance.capacity;
+          const load = (instance.inUse + instance.queueLength) / instance.capacity;
+          if (!best || load < best.load) best = { handler, instance, load };
+        }
+      }
+      const partitions = queue.config.partitions;
+      const limit = partitions > 0 ? Math.min(partitions, capacity) : capacity;
+      if (!best || group.inflight >= limit) break;
+      const message = group.buffer[group.head++]!;
+      group.inflight++;
+      this.startJob(group, best.handler, best.instance, message);
+    }
+    if (group.head > 4096 && group.head * 2 > group.buffer.length) {
+      group.buffer = group.buffer.slice(group.head);
+      group.head = 0;
+    }
+  }
+
+  private startJob(group: QueueGroup, handler: PreparedHandler, instance: Resource, message: Message): void {
+    const req: Req = {
+      id: -1,
+      flow: handler.flow,
+      startMs: this.clock,
+      attempt: 0,
+      traced: false,
+      spans: [],
+      job: { group, message },
+    };
+    const att: Attempt = {
+      req,
+      dead: false,
+      leases: [],
+      held: new Map(),
+      preferred: new Map([[handler.handler.consumerNodeId, instance]]),
+      location: group.queueId,
+      path: [group.queueId],
+      httpStatus: 200,
+    };
+    this.runSteps(att, handler.flow.flow.steps, 0, () => this.complete(att));
+  }
+
+  /** A consumer finished a message, successfully or not. Failed messages are redelivered, then dead-lettered. */
+  private jobDone(job: NonNullable<Req['job']>, ok: boolean): void {
+    const { group, message } = job;
+    group.inflight--;
+    if (ok) {
+      group.consumedThisSecond++;
+      this.messagesConsumed++;
+    } else if (message.attempts + 1 < MAX_DELIVERIES) {
+      this.schedule(REDELIVERY_DELAY_MS, () => {
+        group.buffer.push({ at: message.at, attempts: message.attempts + 1 });
+        this.dispatch(group);
+      });
+    } else {
+      this.messagesDeadLettered++;
+      const queue = this.nodes.get(group.queueId);
+      if (queue?.kind === 'queue') queue.deadLettered++;
+    }
+    this.dispatch(group);
   }
 
   private call(att: Attempt, nodeId: string, operation: 'read' | 'write' | 'process', next: () => void): void {
@@ -727,6 +981,7 @@ export class Simulation implements Clock {
     if (att.dead) return;
     att.dead = true;
     this.releaseAll(att);
+    if (att.req.job) return this.jobDone(att.req.job, att.httpStatus < 500);
     let back = 0;
     for (let i = att.path.length - 1; i > 0; i--) back += this.hopLatency(att.path[i]!, att.path[i - 1]!);
     this.schedule(back, () => {
@@ -745,6 +1000,7 @@ export class Simulation implements Clock {
     att.dead = true;
     this.releaseAll(att);
     const req = att.req;
+    if (req.job) return this.jobDone(req.job, false);
     if (req.traced) req.spans.push({ nodeId: where, startMs: this.clock - req.startMs, waitMs: 0, serviceMs: 0, outcome: status === 'timeout' ? 'timeout' : status === 'rejected' ? 'rejected' : 'failed' });
     const flow = req.flow.flow;
     if (req.attempt < flow.retry.attempts) {
@@ -838,6 +1094,8 @@ export class Simulation implements Clock {
       else r.bringUp();
     }
     if (change.instance === undefined) node.up = change.action === 'up';
+    // Restored brokers and consumers pick up the waiting backlog.
+    for (const group of this.groups) this.dispatch(group);
   }
 
   private resourcesOf(node: RuntimeNode): Resource[] {
@@ -854,6 +1112,46 @@ export class Simulation implements Clock {
   }
 
   // ── Metrics ────────────────────────────────────────────────
+
+  /**
+   * Backlog, lag and throughput of a queue. With fan-out, the slowest consumer group
+   * is reported, since that's the one falling behind. Utilization is backlog fullness.
+   */
+  private sampleQueue(node: Extract<RuntimeNode, { kind: 'queue' }>): EngineNodeSample {
+    let backlog = 0;
+    let lagMs = 0;
+    let consumed = 0;
+    for (const group of node.groups) {
+      this.dispatch(group); // safety net: consumers freed by other traffic pick up work
+      const depth = group.buffer.length - group.head;
+      backlog = Math.max(backlog, depth);
+      if (depth > 0) lagMs = Math.max(lagMs, this.clock - group.buffer[group.head]!.at);
+      consumed += group.consumedThisSecond;
+      group.consumedThisSecond = 0;
+    }
+    const utilization = Math.min(1, backlog / node.config.maxBacklog);
+    const sampleOut: EngineNodeSample = {
+      nodeId: node.node.id,
+      utilization: round(utilization, 3),
+      queueLength: backlog,
+      avgWaitMs: round(lagMs),
+      servedPerSec: node.published,
+      up: node.up,
+      consumedPerSec: consumed,
+      lagMs: round(lagMs),
+      deadLettered: node.deadLettered,
+    };
+    node.published = 0;
+    const agg = this.nodeAgg.get(node.node.id) ?? emptyAgg();
+    agg.utilSum += utilization;
+    agg.utilPeak = Math.max(agg.utilPeak, utilization);
+    agg.maxQueue = Math.max(agg.maxQueue, backlog);
+    agg.maxLagMs = Math.max(agg.maxLagMs, lagMs);
+    agg.served += sampleOut.servedPerSec;
+    agg.samples++;
+    this.nodeAgg.set(node.node.id, agg);
+    return sampleOut;
+  }
 
   private bucket(timeMs: number): Bucket {
     const index = Math.floor(timeMs / 1000);
@@ -875,6 +1173,10 @@ export class Simulation implements Clock {
     const nodes: EngineNodeSample[] = [];
 
     for (const node of this.nodes.values()) {
+      if (node.kind === 'queue') {
+        nodes.push(this.sampleQueue(node));
+        continue;
+      }
       const resources = this.resourcesOf(node);
       if (resources.length === 0) continue;
       const samples: ResourceSample[] = resources.map((r) => r.sample());
@@ -918,7 +1220,7 @@ export class Simulation implements Clock {
       }
       nodes.push(sampleOut);
 
-      const agg = this.nodeAgg.get(node.node.id) ?? { utilSum: 0, utilPeak: 0, maxQueue: 0, waitSum: 0, waitCount: 0, served: 0, samples: 0 };
+      const agg = this.nodeAgg.get(node.node.id) ?? emptyAgg();
       agg.utilSum += utilization;
       agg.utilPeak = Math.max(agg.utilPeak, utilization);
       agg.maxQueue = Math.max(agg.maxQueue, queue);
@@ -942,7 +1244,8 @@ export class Simulation implements Clock {
     });
 
     const trafficOver = this.clock >= this.durationMs;
-    if (!trafficOver || this.inFlight > 0) {
+    const messagesPending = this.groups.some((g) => g.inflight > 0 || g.buffer.length > g.head);
+    if (!trafficOver || this.inFlight > 0 || messagesPending) {
       if (this.clock + 1000 <= this.endMs) this.events.push(this.clock + 1000, () => this.sampleSecond());
     }
   }

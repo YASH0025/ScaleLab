@@ -19,7 +19,7 @@ Early development. This repository currently contains the foundation and the sim
 | `packages/templates` | Ready-to-run architectures: ShopSphere (e-commerce) and ShopSphere microservices (services + Kafka + workers) |
 | `packages/config` | Shared TypeScript configuration |
 
-Roadmap: capacity planner and cost estimator, infrastructure import, trace calibration, architecture as code with a CI check, and live changes with "what will break" impact analysis.
+What comes next is in [ROADMAP.md](ROADMAP.md): capacity planning and cost, business journeys and failure paths, infrastructure import, trace calibration, a CI check, and "what will break" impact analysis.
 
 ## Run the playground
 

@@ -1,0 +1,26 @@
+{
+  "name": "@scalelab/interview",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "System design interview practice: concepts, classic problems, and a grader that runs your design under real load.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@scalelab/catalog": "*",
+    "@scalelab/engine": "*",
+    "@scalelab/model": "*",
+    "@scalelab/planner": "*",
+    "@scalelab/templates": "*"
+  },
+  "devDependencies": {
+    "@scalelab/config": "*",
+    "typescript": "^5.6.0",
+    "vitest": "^5.0.3"
+  }
+}

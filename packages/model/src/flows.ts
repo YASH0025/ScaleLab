@@ -102,6 +102,8 @@ export function deriveFlows(nodes: ArchNode[], edges: ArchEdge[], resolve: Arche
       for (const x of externals) steps.push({ kind: 'call', nodeId: x, operation: 'read' });
     } else {
       for (const db of stores) steps.push({ kind: 'call', nodeId: db, operation: 'write', effect: effectSaved(label.get(db) ?? db) });
+      // A cache with no store behind it is the store itself (sessions, counters, a geo index).
+      if (cache && stores.length === 0) steps.push({ kind: 'call', nodeId: cache, operation: 'write', effect: effectSaved(label.get(cache) ?? cache) });
       for (const x of externals) {
         const effect = kind.get(x) === 'object-storage' ? effectSaved(label.get(x) ?? x) : effectExternal(label.get(x) ?? x);
         steps.push({ kind: 'call', nodeId: x, operation: 'write', effect });
@@ -115,7 +117,7 @@ export function deriveFlows(nodes: ArchNode[], edges: ArchEdge[], resolve: Arche
 
   /** Does anything at or below this service write data or publish messages? */
   function writes(serviceId: string, stack: string[]): boolean {
-    if (targetsOfKind(serviceId, [...DATA_STORES, ...QUEUES, ...EXTERNALS]).length > 0) return true;
+    if (targetsOfKind(serviceId, [...DATA_STORES, ...QUEUES, ...EXTERNALS, 'cache']).length > 0) return true;
     if (stack.length > MAX_DEPTH) return false;
     return servicesBehind(serviceId).some((n) => !stack.includes(n) && writes(n, [...stack, n]));
   }
@@ -153,12 +155,17 @@ export function deriveFlows(nodes: ArchNode[], edges: ArchEdge[], resolve: Arche
     return { flows: [], handlers, hints: ['Connect a client (like a browser or Next.js) to your system to send traffic.', ...hints] };
   }
   const client = clientEdges[0]!.source;
-  /** The CDN in front of an entry point, if there is one: the entry itself, or behind DNS. */
-  const cdnFor = (entry: string): string | undefined => {
+  /**
+   * The CDN in front of an entry point, if there is one: the entry itself, or a CDN behind DNS.
+   * With a service given, only a CDN that actually leads to that service counts, so
+   * DNS → CDN → images and DNS → load balancer → API don't put the API behind the CDN.
+   */
+  const cdnFor = (entry: string, service?: string): string | undefined => {
     const k = kind.get(entry);
     if (k === 'cdn') return entry;
-    if (k === 'dns') return targetsOfKind(entry, ['cdn'])[0];
-    return undefined;
+    if (k !== 'dns') return undefined;
+    const cdns = targetsOfKind(entry, ['cdn']);
+    return service ? cdns.find((c) => servicesBehind(c).includes(service)) : cdns[0];
   };
   const entries: Array<{ entry: string; service: string }> = [];
   /** Object storage reached straight from the client (pre-signed URLs) or through a CDN. */
@@ -190,7 +197,7 @@ export function deriveFlows(nodes: ArchNode[], edges: ArchEdge[], resolve: Arche
     const slug = slugOf(name);
     const work: FlowStep = { kind: 'call', nodeId: service, operation: 'process' };
     const read = inside(service, 'read', [service]);
-    const cdn = cdnFor(entry);
+    const cdn = cdnFor(entry, service);
     // Behind a CDN, reads are answered at the edge on a hit and only misses reach the service.
     const readSteps: FlowStep[] = cdn
       ? [{ kind: 'cache-lookup', cacheNodeId: cdn, onHit: [], onMiss: [work, ...read], writeBackOnMiss: true }]

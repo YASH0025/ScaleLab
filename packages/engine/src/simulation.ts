@@ -910,7 +910,7 @@ export class Simulation implements Clock {
         });
       case 'cache': {
         const dist = operation === 'write' ? node.config.writeLatency : node.config.readLatency;
-        return this.remoteOp(att, node, node.pool, dist, next, (reason) => this.failFromAcquire(att, reason, nodeId));
+        return this.remoteOp(att, node, node.pool, dist, next, (reason) => this.failFromAcquire(att, reason, nodeId), operation === 'write' ? effect : undefined);
       }
       case 'db': {
         const target = operation === 'write' ? node.primary : this.pickReadReplica(node);

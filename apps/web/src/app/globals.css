@@ -117,3 +117,14 @@ input[type='number']::-webkit-inner-spin-button { opacity: 0.4; }
 @media (prefers-reduced-motion: reduce) {
   .anim-indeterminate { animation: none; width: 100%; opacity: 0.6; }
 }
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(0.6); opacity: 0.5; }
+  50% { transform: scale(1.4); opacity: 1; }
+}
+.anim-indeterminate-dot {
+  animation: pulse-dot 1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-indeterminate-dot { animation: none; }
+}

@@ -31,12 +31,11 @@ export function referenceDesign(name: string, nodes: RefNode[], links: Array<[st
     }
     if (!changed) break;
   }
-  // Monitoring sits at the bottom, out of the request path.
-  const deepest = Math.max(...layer.values());
-  for (const n of nodes) if (getTechnology(n.tech)?.archetype === 'observability') layer.set(n.id, deepest + 1);
+  // Monitoring sits off to the side, out of the request path.
+  const isMonitor = (id: string) => getTechnology(nodes.find((n) => n.id === id)!.tech)?.archetype === 'observability';
 
   const rows = new Map<number, string[]>();
-  for (const id of ids) rows.set(layer.get(id)!, [...(rows.get(layer.get(id)!) ?? []), id]);
+  for (const id of ids.filter((i) => !isMonitor(i))) rows.set(layer.get(id)!, [...(rows.get(layer.get(id)!) ?? []), id]);
   const x = new Map<string, number>();
   const parents = (id: string) => links.filter(([, b]) => b === id).map(([a]) => a);
   const specs = new Map<string, NodeSpec>();
@@ -53,6 +52,13 @@ export function referenceDesign(name: string, nodes: RefNode[], links: Array<[st
       const n = nodes.find((m) => m.id === id)!;
       specs.set(id, { id, tech: n.tech, label: n.label, x: nx, y: l * Y_GAP, ...(n.config ? { config: n.config } : {}), ...(n.libraries ? { libraries: n.libraries } : {}) });
     });
+  }
+  const right = Math.max(0, ...[...x.values()]);
+  for (const id of ids.filter(isMonitor)) {
+    const n = nodes.find((m) => m.id === id)!;
+    const parent = parents(id)[0];
+    const y = parent ? specs.get(parent)!.y : 0;
+    specs.set(id, { id, tech: n.tech, label: n.label, x: right + X_GAP, y, ...(n.config ? { config: n.config } : {}) });
   }
   return buildDesign(name, '', ids.map((id) => specs.get(id)!), links);
 }

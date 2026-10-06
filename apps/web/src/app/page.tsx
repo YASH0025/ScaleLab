@@ -30,7 +30,20 @@ export default function Home() {
             An interactive playground for application architecture. Build it on a canvas, flood it with traffic, and watch
             where it bends and breaks.
           </p>
-          <div className="mt-9 flex flex-wrap gap-3">
+          <Link
+            href="/interview"
+            className="mt-8 flex max-w-xl items-center gap-4 rounded-2xl border border-accent/50 bg-panel/90 px-5 py-4 transition hover:border-accent"
+          >
+            <span className="text-[28px]" aria-hidden="true">
+              🎯
+            </span>
+            <span>
+              <span className="block text-[15px] font-semibold">Practice system design interviews</span>
+              <span className="block text-[13px] text-muted">15 classic problems, graded by running your design at peak traffic and breaking it.</span>
+            </span>
+            <span className="ml-auto text-accent-soft">→</span>
+          </Link>
+          <div className="mt-6 flex flex-wrap gap-3">
             <Link
               href="/play?template=shopsphere"
               className="rounded-xl bg-accent px-5 py-3 text-[15px] font-semibold text-white transition hover:brightness-110"

@@ -45,7 +45,15 @@ const entryTargets: Partial<Record<Archetype, Protocol[]>> = {
 
 const rules: Rules = {
   client: entryTargets,
-  dns: {},
+  // DNS hands clients the address of the entry point; the lookup is cached.
+  dns: {
+    cdn: ['dns-lookup'],
+    gateway: ['dns-lookup'],
+    'load-balancer': ['dns-lookup'],
+    'compute-service': ['dns-lookup'],
+    'serverless-function': ['dns-lookup'],
+    'realtime-server': ['dns-lookup'],
+  },
   cdn: {
     gateway: HTTP_LIKE,
     'load-balancer': HTTP_LIKE,

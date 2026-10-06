@@ -173,7 +173,7 @@ interface Base {
 }
 type RuntimeNode =
   | (Base & { kind: 'client' })
-  | (Base & { kind: 'lb'; config: LoadBalancerConfig; rr: number })
+  | (Base & { kind: 'lb'; config: LoadBalancerConfig; rr: number; windowSec: number; windowCount: number; limited: number; passed: number })
   | (Base & { kind: 'compute'; config: ComputeConfig; instances: Resource[]; overheadMs: number; auth: Distribution[] })
   | (Base & { kind: 'cache'; config: CacheConfig; pool: Resource; hits: number; misses: number })
   | (Base & { kind: 'db'; config: RelationalDbConfig; primary: Resource; replicas: Resource[] })
@@ -479,7 +479,7 @@ export class Simulation implements Clock {
       case 'client':
         return { ...base, kind: 'client' };
       case 'load-balancer':
-        return { ...base, kind: 'lb', config: c, rr: 0 };
+        return { ...base, kind: 'lb', config: c, rr: 0, windowSec: -1, windowCount: 0, limited: 0, passed: 0 };
       case 'compute': {
         let overheadMs = 0;
         const auth: Distribution[] = [];
@@ -502,16 +502,19 @@ export class Simulation implements Clock {
           hits: 0,
           misses: 0,
         };
-      case 'relational-db':
+      case 'relational-db': {
+        // Each shard has its own primary and replicas; keys spread evenly, so capacity adds up.
+        const shards = c.shards ?? 1;
         return {
           ...base,
           kind: 'db',
           config: c,
-          primary: pool('', c.connectionPool, c.queueLimit, c.timeoutMs),
+          primary: pool('', c.connectionPool * shards, c.queueLimit * shards, c.timeoutMs),
           replicas: Array.from({ length: c.readReplicas }, (_, i) =>
-            pool(`/replica-${i + 1}`, c.connectionPool, c.queueLimit, c.timeoutMs),
+            pool(`/replica-${i + 1}`, c.connectionPool * shards, c.queueLimit * shards, c.timeoutMs),
           ),
         };
+      }
       case 'queue':
         return { ...base, kind: 'queue', config: c, groups: [], published: 0, deadLettered: 0 };
       case 'external':
@@ -669,6 +672,20 @@ export class Simulation implements Clock {
       att.location = entry.node.id;
       att.path.push(entry.node.id);
       if (!entry.up) return this.fail(att, 'error', 503, entry.node.id);
+      const limit = entry.config.rateLimitRps ?? 0;
+      if (limit > 0) {
+        const sec = Math.floor(this.clock / 1000);
+        if (sec !== entry.windowSec) {
+          entry.windowSec = sec;
+          entry.windowCount = 0;
+        }
+        if (++entry.windowCount > limit) {
+          entry.limited++;
+          this.span(att, entry.node.id, 0, 0, 'failed');
+          return this.fail(att, 'rejected', 429, entry.node.id);
+        }
+      }
+      entry.passed++;
       const overhead = sample(this.serviceRng, entry.config.overhead) + entry.extraLatencyMs;
       this.span(att, entry.node.id, 0, overhead, 'complete');
       this.schedule(overhead, () => {
@@ -893,7 +910,7 @@ export class Simulation implements Clock {
         });
       case 'cache': {
         const dist = operation === 'write' ? node.config.writeLatency : node.config.readLatency;
-        return this.remoteOp(att, node, node.pool, dist, next, (reason) => this.failFromAcquire(att, reason, nodeId));
+        return this.remoteOp(att, node, node.pool, dist, next, (reason) => this.failFromAcquire(att, reason, nodeId), operation === 'write' ? effect : undefined);
       }
       case 'db': {
         const target = operation === 'write' ? node.primary : this.pickReadReplica(node);
@@ -1467,6 +1484,29 @@ export class Simulation implements Clock {
       }
       if (node.kind === 'external') {
         nodes.push(this.sampleExternal(node));
+        continue;
+      }
+      if (node.kind === 'lb') {
+        // Routers have no pool to fill; with a rate limit, "busy" is how close traffic is to it.
+        const limit = node.config.rateLimitRps ?? 0;
+        const utilization = limit > 0 ? Math.min(1, node.passed / limit) : 0;
+        nodes.push({
+          nodeId: node.node.id,
+          utilization: round(utilization, 3),
+          queueLength: 0,
+          avgWaitMs: 0,
+          servedPerSec: node.passed,
+          up: node.up,
+          ...(limit > 0 ? { failedPerSec: node.limited } : {}),
+        });
+        const agg = this.nodeAgg.get(node.node.id) ?? emptyAgg();
+        agg.utilSum += utilization;
+        agg.utilPeak = Math.max(agg.utilPeak, utilization);
+        agg.served += node.passed;
+        agg.samples++;
+        this.nodeAgg.set(node.node.id, agg);
+        node.passed = 0;
+        node.limited = 0;
         continue;
       }
       const resources = this.resourcesOf(node);

@@ -18,6 +18,7 @@ Early development. This repository currently contains the foundation and the sim
 | `packages/engine` | Discrete-event simulation engine: traffic, queues, failures, retries, metrics and traces. Pure TypeScript, runs in a Web Worker or Node |
 | `packages/planner` | Cost estimates from list prices, and a capacity planner that finds the cheapest setup meeting your targets |
 | `packages/importer` | Reads a project's setup files (docker-compose, package.json, requirements.txt, pom.xml, go.mod, .csproj, .env…) and turns them into a design |
+| `packages/interview` | System design interview practice: 38 concepts, 15 classic problems with model answers, and a grader that runs your design at peak and through failures |
 | `packages/templates` | Ready-to-run architectures: ShopSphere (e-commerce), ShopSphere microservices (services + Kafka + workers) and ShopSphere checkout (Auth0, Stripe, SendGrid and a Checkout journey) |
 | `packages/config` | Shared TypeScript configuration |
 
@@ -68,6 +69,24 @@ Flows are derived from the canvas: every service behind the entry point gets tra
 - **Cost estimate**: every component has a list-price estimate (AWS us-east-1, on-demand, checked October 2026): backends per instance, databases sized by concurrent queries plus read replicas, caches, Kafka clusters, load balancer capacity units, and SQS per message. Storage, data transfer, frontend hosting and discounts are not included.
 - **Plan capacity**: set a traffic level and targets (p95 latency, error rate, queue lag, and headroom: how busy any component may be). The planner simulates candidate setups the way an engineer would (scale the component closest to the root cause, keep the change that helps most per dollar) and then removes anything that isn't needed. It recommends the cheapest setup that meets every target, and applies it to the canvas in one click.
 - It changes capacity only (instances, read replicas, database size, partitions). When only faster code or a cache would help, it says so instead.
+
+## System design interview practice
+
+Open `/interview`, pick a problem, and design it on the canvas.
+
+- **15 problems**: URL shortener, Pastebin, API rate limiter, search autocomplete, notification system, web crawler, flash sale, AI assistant with RAG, photo sharing (Instagram), news feed (Twitter), chat (WhatsApp), video streaming (YouTube), ride sharing (Uber), file sync (Dropbox) and ticket booking (Ticketmaster). Each has the interviewer's brief, functional and non-functional requirements, scale numbers, estimate questions, follow-up questions with model answers, an API and data model, and a model design.
+- **38 concepts** across foundations, scaling, data, async and real-time, reliability and operations, from caching and sharding to consistent hashing, fan-out, idempotency, CAP, geo indexing and vector search. A test makes sure every concept is practiced by at least one problem. The concept library says how each is checked: on the canvas, by simulation, in estimates, or in follow-ups.
+- **Grading (100 points)**, all from evidence:
+  - Estimates (15): within 2× of the worked answer is full marks, within 4× is half.
+  - Design (35, plus up to 5 bonus): what the design contains, like a cache in front of the database, media served from S3 through a CDN, work moved to queues, replicas, shards and rate limits.
+  - Peak load (25): the problem's peak traffic is simulated through your design; p95 latency, errors and headroom are scored.
+  - Failure drill (15): one instance of every service and every cache in front of a database are taken down mid-run; what matters is how many more requests fail.
+  - Cost (10): monthly cost at average traffic against the model answer, only once the design handles peak.
+  - Verdict: Strong hire (85+), Hire (70+), Lean no hire (50+), No hire.
+- Every model answer scores 95 or more, and a one-server design scores under 30; tests check both.
+- Grading runs in a Web Worker in about a second. Best scores are kept in your browser.
+
+Every component in the library is simulated: DNS and API gateways route like load balancers (gateways and the rate limiter can cap requests per second and answer 429), CDNs are caches at the edge, NoSQL, wide-column, search and vector stores are databases with connection pools, replicas and shards, object storage and push notifications are remote services, serverless functions have a concurrency limit, and monitoring sits off the request path.
 
 ## Import your project
 

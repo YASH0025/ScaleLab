@@ -6,6 +6,8 @@ import { useEffect } from 'react';
 import { Canvas } from '@/features/canvas/Canvas';
 import { Inspector } from '@/features/inspector/Inspector';
 import { ImportPanel } from '@/features/import/ImportPanel';
+import { InterviewPanel } from '@/features/interview/InterviewPanel';
+import { InterviewReport } from '@/features/interview/InterviewReport';
 import { JourneysPanel } from '@/features/journeys/JourneysPanel';
 import { LibraryPanel } from '@/features/library/LibraryPanel';
 import { MetricsDrawer } from '@/features/metrics/MetricsDrawer';
@@ -18,6 +20,7 @@ import { decodeDesign, readHash } from '@/lib/share';
 import { clearDesign, isEmpty, loadDesign, snapshot, startPersistence } from '@/store/design-doc';
 import { useDesign } from '@/store/use-design';
 import { useImport } from '@/store/use-import';
+import { useInterview } from '@/store/use-interview';
 import { useJourneys } from '@/store/use-journeys';
 import { useSim } from '@/store/use-sim';
 import { useUi } from '@/store/use-ui';
@@ -53,14 +56,18 @@ function openSharedLink(): boolean {
   return true;
 }
 
-export function Workspace({ template }: { template: string | undefined }) {
+export function Workspace({ template, interview }: { template: string | undefined; interview?: string }) {
   const ready = useDesign((s) => s.ready);
 
   useEffect(() => {
     let cancelled = false;
     startPersistence().then(() => {
       if (cancelled) return;
-      if (!openSharedLink()) {
+      if (interview) {
+        useInterview.getState().start(interview);
+        window.history.replaceState(null, '', '/play');
+      } else if (!openSharedLink()) {
+        useInterview.getState().resume();
         if (template === 'shopsphere' || (template === undefined && isEmpty())) loadDesign(shopSphere());
         else if (template === 'microservices') loadDesign(microShop());
         else if (template === 'checkout') {
@@ -80,7 +87,7 @@ export function Workspace({ template }: { template: string | undefined }) {
       cancelled = true;
       window.removeEventListener('hashchange', onHashChange);
     };
-  }, [template]);
+  }, [template, interview]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
@@ -96,6 +103,7 @@ export function Workspace({ template }: { template: string | undefined }) {
             <div className="flex h-full items-center justify-center text-[13px] text-muted">Loading your design…</div>
           )}
           <SharedBanner />
+          <InterviewPanel />
         </main>
         <Inspector />
       </div>
@@ -103,6 +111,7 @@ export function Workspace({ template }: { template: string | undefined }) {
       <PlanPanel />
       <JourneysPanel />
       <ImportPanel />
+      <InterviewReport />
       <Toasts />
       <Celebration />
     </div>

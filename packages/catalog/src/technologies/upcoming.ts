@@ -3,54 +3,10 @@ import { genericConfig } from '../defaults';
 import { tech } from './clients';
 
 /**
- * Technologies users can place and connect today. Their archetypes are not simulated yet,
- * so the UI shows a "simulation coming soon" badge on them.
+ * Groups you can draw around components (a Kubernetes cluster, an availability zone).
+ * They organize the canvas; the engine doesn't simulate them yet.
  */
 export const upcomingTechnologies: TechnologyDefinition[] = [
-  tech({
-    id: 'cloudflare-cdn',
-    name: 'Cloudflare CDN',
-    category: 'dns-edge',
-    archetype: 'cdn',
-    icon: 'cloudflare',
-    brandColor: '#F38020',
-    description: 'Global CDN that caches content at the edge.',
-    tags: ['cdn', 'edge'],
-    defaults: genericConfig({ edgeHitRatio: 0.9 }),
-  }),
-  tech({
-    id: 'kong',
-    name: 'Kong',
-    category: 'gateway',
-    archetype: 'gateway',
-    icon: 'kong',
-    brandColor: '#003459',
-    description: 'API gateway for routing, auth and rate limiting.',
-    tags: ['api-gateway'],
-    defaults: genericConfig({ overheadMs: 2 }),
-  }),
-  tech({
-    id: 'mongodb',
-    name: 'MongoDB',
-    category: 'document-db',
-    archetype: 'document-db',
-    icon: 'mongodb',
-    brandColor: '#47A248',
-    description: 'Document database storing JSON-like records.',
-    tags: ['nosql', 'document'],
-    defaults: genericConfig({ connectionPool: 100, readMs: 5, writeMs: 10 }),
-  }),
-  tech({
-    id: 'aws-s3',
-    name: 'AWS S3',
-    category: 'object-storage',
-    archetype: 'object-storage',
-    icon: 'amazons3',
-    brandColor: '#569A31',
-    description: 'Object storage for files, images and backups.',
-    tags: ['aws', 'storage'],
-    defaults: genericConfig({ getMs: 30, putMs: 50 }),
-  }),
   tech({
     id: 'kubernetes-cluster',
     name: 'Kubernetes cluster',

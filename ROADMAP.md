@@ -17,6 +17,8 @@ All numbers ScaleLab shows are modeled estimates, never measurements of a real s
 - **7. Business journeys and failure paths**: outside services (Stripe, PayPal, Razorpay, Twilio, SendGrid, OpenAI, Auth0, Clerk) with response time, errors, "slow, no reply" timeouts and rate limits. Journeys send users through steps in order with retries and idempotency keys, and show where they drop off, which steps failed halfway ("charged, but no order") and which work happened twice ("charged twice"), each with a fix. Journeys export as a k6 load test. Later: branches (payment failed → retry page), bad-data responses, and Playwright and Postman exports.
 - **3. Infrastructure import, version 1**: paste a public GitHub link or pick a folder. ScaleLab reads only setup files (docker-compose, package.json, requirements.txt, pyproject.toml, Pipfile, pom.xml, build.gradle, go.mod, .csproj, Dockerfiles, Prisma schemas, .env examples), works out the frontends, services, workers, databases, caches, queues and outside services and how they connect, shows its evidence and its guesses for review, then lays the design out on the canvas ready to run. Folders are read in the browser and never uploaded.
 
+- **System design interview practice**: 15 classic problems and 38 concepts, graded by estimates, design checks, a simulated peak, a failure drill and cost, with follow-up questions and model answers. Every component in the library is now simulated, including CDNs, API gateways and rate limiting, DNS, serverless, WebSockets, NoSQL, search, vector stores, object storage and database sharding. Later: more problems, custom problems, timed mock interviews, and sharing a scored attempt.
+
 ## Next
 
 ### 3. Infrastructure import (version 1 done)

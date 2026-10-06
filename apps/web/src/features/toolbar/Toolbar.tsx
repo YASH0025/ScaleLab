@@ -117,6 +117,9 @@ export function Toolbar() {
             >
               Import your project…
             </button>
+            <a href="/interview" className="block w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-raised">
+              Practice interviews…
+            </a>
             <div className="my-1 h-px bg-line" />
             <button
               className="w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-raised"

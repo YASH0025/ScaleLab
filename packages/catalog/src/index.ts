@@ -6,6 +6,7 @@ import { dataTechnologies } from './technologies/data';
 import { externalTechnologies } from './technologies/external';
 import { loadBalancerTechnologies } from './technologies/load-balancers';
 import { messagingTechnologies, workerTechnologies } from './technologies/messaging';
+import { platformTechnologies } from './technologies/platform';
 import { upcomingTechnologies } from './technologies/upcoming';
 import { pricingFor } from './pricing';
 
@@ -20,6 +21,7 @@ export const technologies: readonly TechnologyDefinition[] = [
   ...messagingTechnologies,
   ...workerTechnologies,
   ...externalTechnologies,
+  ...platformTechnologies,
   ...upcomingTechnologies,
 ].map((t) => {
   const pricing = pricingFor(t.id, t.archetype);
@@ -89,4 +91,16 @@ export function searchTechnologies(query: string): TechnologyDefinition[] {
       t.category.includes(q) ||
       t.tags.some((tag) => tag.includes(q)),
   );
+}
+
+/**
+ * Brings a saved node up to date with the catalog. Technologies that used to be
+ * placeholders (a CDN, MongoDB, S3…) saved a generic config; now that they are
+ * simulated they get their real defaults, keeping whether they were up.
+ */
+export function upgradeNode<T extends { technologyId: string; config: { type: string; available: boolean; extraLatencyMs: number } }>(node: T): T {
+  const t = techById.get(node.technologyId);
+  if (!t || node.config.type === t.defaults.type) return node;
+  const defaults = JSON.parse(JSON.stringify(t.defaults)) as T['config'];
+  return { ...node, config: { ...defaults, available: node.config.available, extraLatencyMs: node.config.extraLatencyMs } };
 }

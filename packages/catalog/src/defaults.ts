@@ -21,18 +21,33 @@ export const exp = (meanMs: number): Distribution => ({ kind: 'exponential', mea
 export const logn = (meanMs: number, p99Ms: number): Distribution => ({ kind: 'lognormal', meanMs, p99Ms });
 export const fixed = (valueMs: number): Distribution => ({ kind: 'constant', valueMs });
 
-/** The archetypes the engine simulates in the MVP. Everything else shows "coming soon". */
+/**
+ * The archetypes the engine simulates. Observability tools are included: they sit off the
+ * request path by design, so "simulated" means they behave correctly by doing nothing.
+ * Only grouping boxes (clusters, zones) show "coming soon".
+ */
 export const SIMULATED_ARCHETYPES: readonly Archetype[] = [
   'client',
+  'dns',
+  'cdn',
+  'gateway',
   'load-balancer',
   'compute-service',
+  'serverless-function',
+  'realtime-server',
+  'auth-provider',
   'cache',
   'relational-db',
+  'document-db',
+  'wide-column-db',
+  'search-engine',
+  'vector-db',
+  'object-storage',
   'message-queue',
   'event-stream',
   'worker',
   'external-api',
-  'auth-provider',
+  'observability',
 ];
 
 export const isSimulated = (archetype: Archetype): boolean => SIMULATED_ARCHETYPES.includes(archetype);

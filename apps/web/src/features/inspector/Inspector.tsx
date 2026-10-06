@@ -82,21 +82,36 @@ function ConfigFields({ node }: { node: ArchNode }) {
           <NumberField label="Timeout" value={c.timeoutMs} min={10} step={100} suffix="ms" onChange={(v) => set({ ...c, timeoutMs: v })} />
         </>
       );
-    case 'load-balancer':
+    case 'load-balancer': {
+      const archetype = getTechnology(node.technologyId)?.archetype;
+      if (archetype === 'dns') {
+        return (
+          <p className="text-[13px] leading-relaxed text-muted">
+            Points your domain at the entry point. Resolvers cache the answer, so it adds about a millisecond, not a full lookup per request.
+          </p>
+        );
+      }
       return (
-        <label className="flex items-center justify-between py-1.5 text-[13px]">
-          <span className="text-muted">Strategy</span>
-          <select
-            value={c.strategy}
-            onChange={(e) => set({ ...c, strategy: e.target.value as typeof c.strategy })}
-            className="rounded-md border border-line-strong bg-bg px-2 py-1 text-[12px] outline-none focus:border-accent"
-          >
-            <option value="least-connections">Least connections</option>
-            <option value="round-robin">Round robin</option>
-            <option value="random">Random</option>
-          </select>
-        </label>
+        <>
+          <label className="flex items-center justify-between py-1.5 text-[13px]">
+            <span className="text-muted">Strategy</span>
+            <select
+              value={c.strategy}
+              onChange={(e) => set({ ...c, strategy: e.target.value as typeof c.strategy })}
+              className="rounded-md border border-line-strong bg-bg px-2 py-1 text-[12px] outline-none focus:border-accent"
+            >
+              <option value="least-connections">Least connections</option>
+              <option value="round-robin">Round robin</option>
+              <option value="random">Random</option>
+            </select>
+          </label>
+          <NumberField label="Rate limit" value={c.rateLimitRps ?? 0} min={0} step={100} suffix="/s" onChange={(v) => set({ ...c, rateLimitRps: Math.round(v) })} />
+          <p className="mt-2 text-[11px] leading-relaxed text-faint">
+            Requests above the rate limit get 429 Too Many Requests instead of overloading what sits behind. 0 means no limit.
+          </p>
+        </>
       );
+    }
     case 'cache':
       return (
         <>
@@ -112,8 +127,12 @@ function ConfigFields({ node }: { node: ArchNode }) {
           <NumberField label="Read query" value={meanOf(c.readQuery)} min={0.1} suffix="ms" onChange={(v) => set({ ...c, readQuery: withMean(c.readQuery, v) })} />
           <NumberField label="Write query" value={meanOf(c.writeQuery)} min={0.1} suffix="ms" onChange={(v) => set({ ...c, writeQuery: withMean(c.writeQuery, v) })} />
           <NumberField label="Read replicas" value={c.readReplicas} min={0} max={15} onChange={(v) => set({ ...c, readReplicas: Math.round(v) })} />
+          <NumberField label="Shards" value={c.shards ?? 1} min={1} max={256} onChange={(v) => set({ ...c, shards: Math.round(v) })} />
           <NumberField label="Queue limit" value={c.queueLimit} min={0} onChange={(v) => set({ ...c, queueLimit: Math.round(v) })} />
           <NumberField label="Timeout" value={c.timeoutMs} min={10} step={100} suffix="ms" onChange={(v) => set({ ...c, timeoutMs: v })} />
+          <p className="mt-2 text-[11px] leading-relaxed text-faint">
+            Each shard holds part of the data with its own pool and replicas, so capacity grows with shards. Replicas serve reads only.
+          </p>
         </>
       );
     case 'queue':
@@ -159,7 +178,11 @@ function ConfigFields({ node }: { node: ArchNode }) {
     case 'client':
       return <p className="text-[13px] leading-relaxed text-muted">Sends the traffic you set in the toolbar. Connect it to a load balancer or a backend.</p>;
     case 'generic':
-      return <p className="text-[13px] leading-relaxed text-muted">You can place and connect this now. Its behavior isn’t simulated yet, so it only adds network latency.</p>;
+      return getTechnology(node.technologyId)?.archetype === 'observability' ? (
+        <p className="text-[13px] leading-relaxed text-muted">Collects metrics and logs from what you connect to it. It sits off the request path, so it never slows requests down.</p>
+      ) : (
+        <p className="text-[13px] leading-relaxed text-muted">You can place and connect this now. Its behavior isn’t simulated yet, so it only adds network latency.</p>
+      );
   }
 }
 
@@ -234,7 +257,7 @@ function Failures({ node }: { node: ArchNode }) {
   const inject = useSim((s) => s.inject);
   const live = status === 'running' || status === 'paused';
   const c = node.config;
-  if (c.type !== 'compute' && c.type !== 'cache' && c.type !== 'relational-db' && c.type !== 'queue' && c.type !== 'external') return null;
+  if (c.type !== 'compute' && c.type !== 'cache' && c.type !== 'relational-db' && c.type !== 'queue' && c.type !== 'external' && c.type !== 'load-balancer') return null;
   // Outside services are slow in seconds, not milliseconds; enough to pass most caller timeouts.
   const extraMs = c.type === 'external' ? 2000 : 100;
   const btn = 'rounded-lg border px-2.5 py-1.5 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40';

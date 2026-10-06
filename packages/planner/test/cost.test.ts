@@ -55,7 +55,7 @@ describe('estimateCost', () => {
   });
 
   it('flags technologies without a price', () => {
-    const nodes = buildDesign('t', '', [{ id: 'm', tech: 'mongodb', label: 'm', x: 0, y: 0 }], []).nodes;
+    const nodes = buildDesign('t', '', [{ id: 'm', tech: 'kubernetes-cluster', label: 'm', x: 0, y: 0 }], []).nodes;
     const est = estimateCost(nodes);
     expect(est.unpricedCount).toBe(1);
     expect(line(est, 'm').unpriced).toBe(true);

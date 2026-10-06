@@ -1,4 +1,5 @@
 import type { ArchEdge, ArchNode, Design, Journey } from '@scalelab/model';
+import { upgradeNode } from '@scalelab/catalog';
 import * as Y from 'yjs';
 
 /**
@@ -108,6 +109,16 @@ export function removeEdges(ids: string[]): void {
   });
 }
 
+/** Saved components from older versions get their current simulated defaults. */
+function upgradeSavedNodes(): void {
+  doc.transact(() => {
+    for (const [id, node] of nodesMap) {
+      const upgraded = upgradeNode(node);
+      if (upgraded !== node) nodesMap.set(id, upgraded);
+    }
+  });
+}
+
 let persistenceStarted: Promise<void> | undefined;
 
 /** Starts browser persistence once; resolves when saved data has loaded. */
@@ -117,7 +128,10 @@ export function startPersistence(): Promise<void> {
       ({ IndexeddbPersistence }) =>
         new Promise<void>((resolve) => {
           const persistence = new IndexeddbPersistence('scalelab-design', doc);
-          persistence.once('synced', () => resolve());
+          persistence.once('synced', () => {
+            upgradeSavedNodes();
+            resolve();
+          });
         }),
     );
   }

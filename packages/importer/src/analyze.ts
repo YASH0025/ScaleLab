@@ -1,10 +1,31 @@
 import { getTechnology } from '@scalelab/catalog';
 import type { Archetype } from '@scalelab/model';
-import { type ComposeService, dockerfileImage, envKinds, matchImage, matchServiceName, primaryComposeFiles, readCompose } from './compose';
+import { type ComposeService, dockerfileImage, dockerfileImages, envKinds, languageOfImage, matchImage, matchServiceName, primaryComposeFiles, readCompose } from './compose';
 import { hostsIn, kindOfEnv, parseEnv } from './env';
 import { baseName, dirOf, isComposeFile, normalizePath } from './files';
 import { type Unit, readUnits } from './manifests';
 import { BROKER_KINDS, type DetectedComponent, type DetectedLink, type ImportResult, KIND_TECH, type Kind, type RepoFile, type Role } from './types';
+
+/**
+ * The app a compose service builds. Monorepos often build from the root with
+ * "dockerfile: src/cart/Dockerfile", so we look from the Dockerfile's folder up
+ * to the build folder and take the nearest app.
+ */
+function unitForService(svc: ComposeService, units: Unit[]): Unit | undefined {
+  if (svc.buildDir === undefined) return undefined;
+  const byDir = new Map(units.map((u) => [u.dir, u]));
+  if (svc.dockerfile && (svc.buildDir === '' || svc.dockerfile.startsWith(`${svc.buildDir}/`))) {
+    const start = dirOf(svc.dockerfile);
+    for (let dir = start; ; dir = dirOf(dir)) {
+      const u = byDir.get(dir);
+      // A monorepo's root package.json is tooling, not the app this Dockerfile builds.
+      if (u && (dir !== '' || start === '')) return u;
+      if (dir === svc.buildDir || dir === '') break;
+    }
+    if (start !== svc.buildDir) return undefined;
+  }
+  return byDir.get(svc.buildDir);
+}
 
 const ENV_FILE = /^\.env(\.(example|sample|template|dist|local\.example|development|dev))?$/;
 const EXTERNAL_KINDS = new Set<Kind>(['stripe', 'paypal', 'razorpay', 'twilio', 'sendgrid', 'openai', 'auth0', 'clerk']);
@@ -143,7 +164,7 @@ export function analyzeProject(input: RepoFile[], projectName: string): ImportRe
   const svcApp = new Map<string, AppParts>();
   const svcUnit = new Map<string, Unit>();
   for (const svc of compose.services) {
-    const unit = svc.buildDir !== undefined ? units.find((u) => u.dir === svc.buildDir) : undefined;
+    const unit = unitForService(svc, units);
     if (unit) continue;
     const dockerfile = svc.dockerfile ? byPath.get(svc.dockerfile) : undefined;
     const fromImage = dockerfile ? dockerfileImage(dockerfile.content) : undefined;
@@ -328,8 +349,26 @@ export function analyzeProject(input: RepoFile[], projectName: string): ImportRe
   const claimed = new Set<Unit>();
   const workerFromCompose = new Set<Unit>();
   for (const svc of compose.services) {
-    const unit = svc.buildDir !== undefined ? units.find((u) => u.dir === svc.buildDir) : undefined;
+    const unit = unitForService(svc, units);
     if (!unit) {
+      if (svc.buildDir !== undefined && !svcKey.has(svc.name) && svc.hasPorts) {
+        const dockerfile = svc.dockerfile ? byPath.get(svc.dockerfile) : undefined;
+        const language = dockerfile ? dockerfileImages(dockerfile.content).map(languageOfImage).find(Boolean) : undefined;
+        const key = add({
+          key: uniqueKey(svc.name),
+          technologyId: 'express',
+          label: svc.name,
+          libraries: [],
+          evidence: [`service "${svc.name}" in ${svc.file}, with ports open`],
+          confidence: 'guess',
+          note: `${language ? `Written in ${language}, which` : 'Its language'} isn't in the catalog yet, so it's modeled as a generic web service.`,
+          ...(svc.replicas ? { instances: svc.replicas } : {}),
+        });
+        svcKey.set(svc.name, key);
+        svcApp.set(svc.name, { server: key });
+        if (dockerfile) filesUsed.add(dockerfile.path);
+        continue;
+      }
       if (svc.buildDir !== undefined && !svcKey.has(svc.name)) {
         notes.push(
           `"${svc.name}" builds from ${svc.buildDir || 'the project root'}, but no package.json, requirements.txt, pyproject.toml, pom.xml, build.gradle, go.mod or .csproj was found there, so it isn't on the canvas.`,
@@ -471,7 +510,9 @@ export function analyzeProject(input: RepoFile[], projectName: string): ImportRe
   const outgoing = (key: string) => links.filter((l) => l.from === key);
 
   const services = all.filter((c) => c.role === 'service');
-  const proxies = all.filter((c) => c.role === 'proxy');
+  // Entry proxies sit in front of everything. A proxy that services call (an image
+  // server, say) is a backend, not where traffic comes in.
+  const proxies = all.filter((c) => c.role === 'proxy' && !links.some((l) => l.to === c.key && !roleIs(l.from, 'frontend')));
   const entries = services.filter((c) => !incoming.get(c.key));
   let clients = all.filter((c) => c.role === 'frontend');
 
@@ -489,9 +530,17 @@ export function analyzeProject(input: RepoFile[], projectName: string): ImportRe
     if (outgoing(p.key).some((l) => roleIs(l.to, 'service'))) continue;
     for (const s of entries) link(p.key, s.key, 'the proxy forwards to services nothing else calls');
   }
+  // Services that still have no callers get traffic from the main way in, so they aren't left idle.
+  const front = proxies[0] ?? clients[0];
+  const orphans = entries.filter((s) => !links.some((l) => l.to === s.key));
+  if (front) for (const s of orphans) link(front.key, s.key, 'nothing else calls this service, so users do');
 
   const wiredEntries = entries.filter((s) => links.some((l) => l.to === s.key && roleIs(l.from, 'frontend', 'proxy')));
-  if (wiredEntries.length > 3) {
+  if (orphans.length > 0 && wiredEntries.length > 1) {
+    notes.push(
+      `We couldn't see who calls ${orphans.length === 1 ? orphans[0]!.label : `${orphans.length} services (${orphans.slice(0, 3).map((o) => o.label).join(', ')}${orphans.length > 3 ? '…' : ''})`}, so traffic goes straight to ${orphans.length === 1 ? 'it' : 'them'}. Draw the calls you know to make the simulation realistic.`,
+    );
+  } else if (wiredEntries.length > 3) {
     notes.push(
       `We couldn't see which services call each other, so traffic starts at all ${wiredEntries.length} of them. Draw the calls you know (frontend → cart, and so on) to make the simulation realistic.`,
     );

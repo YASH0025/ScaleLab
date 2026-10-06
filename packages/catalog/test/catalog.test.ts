@@ -59,7 +59,7 @@ describe('technology catalog', () => {
       if (t.simulationSupported) expect(t.pricing, t.id).toBeDefined();
     }
     expect(getTechnology('nextjs')?.pricing).toEqual({ kind: 'free' });
-    expect(getTechnology('mongodb')?.pricing).toBeUndefined();
+    expect(getTechnology('kubernetes-cluster')?.pricing).toBeUndefined();
   });
 
   it('resolves archetypes and lookups', () => {

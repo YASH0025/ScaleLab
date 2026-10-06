@@ -13,12 +13,28 @@ export interface DesignIssue {
 export type ArchetypeResolver = (technologyId: string) => Archetype | undefined;
 
 /** The config `type` each archetype must use. Archetypes not listed use 'generic'. */
+/**
+ * The behavior each archetype is simulated with. Many archetypes share one:
+ * a gateway and DNS route like a load balancer, a CDN is a cache at the edge,
+ * every data store is a database with a connection pool, and object storage is
+ * a managed remote service.
+ */
 const CONFIG_TYPE: Partial<Record<Archetype, ArchetypeConfig['type']>> = {
   client: 'client',
+  dns: 'load-balancer',
+  cdn: 'cache',
+  gateway: 'load-balancer',
   'load-balancer': 'load-balancer',
   'compute-service': 'compute',
+  'serverless-function': 'compute',
+  'realtime-server': 'compute',
   cache: 'cache',
   'relational-db': 'relational-db',
+  'document-db': 'relational-db',
+  'wide-column-db': 'relational-db',
+  'search-engine': 'relational-db',
+  'vector-db': 'relational-db',
+  'object-storage': 'external',
   worker: 'compute',
   'message-queue': 'queue',
   'event-stream': 'queue',

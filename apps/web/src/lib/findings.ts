@@ -18,13 +18,25 @@ export interface Bottleneck {
  * A lagging queue ranks just above its consumers, and below the data stores they use.
  */
 const DEPTH: Partial<Record<Archetype, number>> = {
+  dns: 0.5,
+  cdn: 0.5,
+  gateway: 1,
   'load-balancer': 1,
   'compute-service': 2,
+  'serverless-function': 2,
+  'realtime-server': 2,
   worker: 2,
   'message-queue': 2.5,
   'event-stream': 2.5,
   cache: 3,
   'relational-db': 3,
+  'document-db': 3,
+  'wide-column-db': 3,
+  'search-engine': 3,
+  'vector-db': 3,
+  'object-storage': 3,
+  'external-api': 3,
+  'auth-provider': 3,
 };
 
 export const HOT = 0.9;
@@ -79,6 +91,40 @@ export function findBottleneck(
   const base = { nodeId: best.node.id, label: best.node.label, archetype: best.archetype, utilization: best.util, queueLength: queue };
 
   switch (best.archetype) {
+    case 'document-db':
+    case 'wide-column-db':
+    case 'search-engine':
+    case 'vector-db':
+      return {
+        ...base,
+        explanation: `${best.node.label} is at ${pct}% of its connections with ${queue} requests waiting.`,
+        suggestions: hasCache ? ['Raise the cache hit ratio', 'Add shards', 'Add a read replica'] : ['Add a cache in front', 'Add shards', 'Add a read replica'],
+      };
+    case 'gateway':
+    case 'load-balancer':
+      return {
+        ...base,
+        explanation: `The rate limit is reached, so extra requests get 429 Too Many Requests. That protects what's behind it, but those users are turned away.`,
+        suggestions: ['Raise the rate limit if the services behind can take it', 'Add capacity behind it first'],
+      };
+    case 'cdn':
+      return {
+        ...base,
+        explanation: `The CDN is at ${pct}% of its connections.`,
+        suggestions: ['Raise max connections'],
+      };
+    case 'serverless-function':
+      return {
+        ...base,
+        explanation: `Functions at ${pct}% of their concurrency limit. Calls past the limit are throttled.`,
+        suggestions: ['Raise the concurrency limit', 'Make each call faster', 'Put a queue in front to absorb bursts'],
+      };
+    case 'realtime-server':
+      return {
+        ...base,
+        explanation: `Connection handlers at ${pct}% with ${queue} messages waiting.`,
+        suggestions: ['Add instances', 'Add workers per instance'],
+      };
     case 'relational-db':
       return {
         ...base,

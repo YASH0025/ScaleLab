@@ -40,10 +40,11 @@ function TechNodeView({ data }: NodeProps<TechFlowNode>) {
   const isClient = tech.archetype === 'client';
   const isQueue = arch.config.type === 'queue';
   const isExternal = arch.config.type === 'external';
+  const isLimiter = arch.config.type === 'load-balancer' && (arch.config.rateLimitRps ?? 0) > 0;
   /** Queues fill their bar by consumer lag (full at the "falling behind" mark); everything else by utilization. */
   /** Outside services fill their bar by failure share (full at 10%) or rate-limit use, whichever is worse. */
   const failShare = live && live.servedPerSec > 0 ? (live.failedPerSec ?? 0) / live.servedPerSec : 0;
-  const barPct = isExternal
+  const barPct = isExternal || isLimiter
     ? Math.min(100, Math.max(failShare * 1000, (live?.utilization ?? 0) * 100))
     : isQueue
       ? Math.min(100, ((live?.lagMs ?? 0) / LAG_HOT_MS) * 100)
@@ -93,6 +94,16 @@ function TechNodeView({ data }: NodeProps<TechFlowNode>) {
                   in {compact(live.servedPerSec)}/s · out {compact(live.consumedPerSec ?? 0)}/s
                 </span>
               </span>
+            ) : isLimiter ? (
+              <span className="whitespace-nowrap">
+                <span title="Requests let through per second">{compact(live.servedPerSec)}/s</span>
+                <span className={(live.failedPerSec ?? 0) > 0 ? 'text-bad-soft' : ''} title="Requests answered 429 per second">
+                  {' '}
+                  · {compact(live.failedPerSec ?? 0)} limited
+                </span>
+              </span>
+            ) : arch.config.type === 'load-balancer' ? (
+              <span className="whitespace-nowrap">{compact(live.servedPerSec)}/s</span>
             ) : isExternal ? (
               <span className="whitespace-nowrap">
                 <span title="Calls per second">{compact(live.servedPerSec)} calls/s</span>

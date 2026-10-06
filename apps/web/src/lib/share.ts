@@ -1,4 +1,4 @@
-import { resolveArchetype } from '@scalelab/catalog';
+import { resolveArchetype, upgradeNode } from '@scalelab/catalog';
 import { ArchEdgeSchema, ArchNodeSchema, type ArchEdge, type ArchNode, type Journey, JourneySchema, validateDesign } from '@scalelab/model';
 import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from 'lz-string';
 import { z } from 'zod';
@@ -63,7 +63,9 @@ export function decodeDesign(encoded: string): DecodeResult {
   const parsed = PayloadSchema.safeParse(json);
   if (!parsed.success) return { ok: false, error: 'This share link was made by a different version of ScaleLab.' };
 
-  const { name, nodes, edges, journeys, traffic } = parsed.data;
+  const { name, edges, journeys, traffic } = parsed.data;
+  // Links made by older versions may hold placeholder configs for components that are simulated now.
+  const nodes = parsed.data.nodes.map(upgradeNode);
   const issues = validateDesign(
     {
       schemaVersion: 1,

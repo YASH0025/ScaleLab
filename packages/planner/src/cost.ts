@@ -10,6 +10,8 @@ export interface Usage {
   requestsPerSec?: number;
   /** Messages per second published to each queue or stream, by node id. */
   messagesPerSec?: Record<string, number>;
+  /** Requests per second through each component, by node id (from a simulation). */
+  nodeRequestsPerSec?: Record<string, number>;
 }
 
 export interface CostLine {
@@ -67,12 +69,14 @@ function lineFor(node: ArchNode, pricing: Pricing | undefined, usage: Usage): Om
     case 'database': {
       const pool = c.type === 'relational-db' ? c.connectionPool : pricing.queriesPerUnit;
       const replicas = c.type === 'relational-db' ? c.readReplicas : 0;
+      const shards = c.type === 'relational-db' ? (c.shards ?? 1) : 1;
       const steps = databaseSizeSteps(pool, pricing.queriesPerUnit);
       const perInstance = pricing.hourlyUsd * 2 ** steps * HOURS_PER_MONTH;
       const size = resize(pricing.instanceClass, steps);
+      const each = replicas > 0 ? `${size} + ${replicas} read replica${replicas > 1 ? 's' : ''}` : size;
       return {
-        monthlyUsd: money(perInstance * (1 + replicas)),
-        basis: replicas > 0 ? `${size} + ${replicas} read replica${replicas > 1 ? 's' : ''}` : size,
+        monthlyUsd: money(perInstance * (1 + replicas) * shards),
+        basis: shards > 1 ? `${shards} shards × (${each})` : each,
         usageBased: false,
         unpriced: false,
       };
@@ -104,6 +108,19 @@ function lineFor(node: ArchNode, pricing: Pricing | undefined, usage: Usage): Om
       return {
         monthlyUsd: money((requests / 1_000_000) * pricing.perMillionUsd),
         basis: perSec === undefined ? 'Pay per message; run a simulation to estimate' : `${Math.round(perSec).toLocaleString('en-US')} messages/s`,
+        usageBased: true,
+        unpriced: false,
+      };
+    }
+    case 'per-million-requests': {
+      const perSec = usage.nodeRequestsPerSec?.[node.id] ?? usage.requestsPerSec;
+      const requests = (perSec ?? 0) * SECONDS_PER_MONTH;
+      return {
+        monthlyUsd: money((requests / 1_000_000) * pricing.perMillionUsd),
+        basis:
+          perSec === undefined
+            ? `$${pricing.perMillionUsd} per million requests (${pricing.note})`
+            : `${Math.round(perSec).toLocaleString('en-US')} requests/s at $${pricing.perMillionUsd} per million (${pricing.note})`,
         usageBased: true,
         unpriced: false,
       };

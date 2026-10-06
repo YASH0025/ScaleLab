@@ -110,6 +110,8 @@ export const LoadBalancerConfigSchema = z.object({
   strategy: z.enum(['round-robin', 'least-connections', 'random']),
   overhead: DistributionSchema,
   healthChecks: z.boolean(),
+  /** Requests per second allowed through; more get 429 Too Many Requests. 0 or missing = no limit. */
+  rateLimitRps: z.number().int().min(0).optional(),
 });
 
 export const ComputeConfigSchema = z.object({
@@ -140,6 +142,11 @@ export const RelationalDbConfigSchema = z.object({
   queueLimit: z.number().int().min(0),
   timeoutMs: z.number().positive(),
   readReplicas: z.number().int().min(0),
+  /**
+   * Partitions the data is split across. Each shard has its own primary, connection pool
+   * and replicas, so capacity grows with shards. Missing = 1.
+   */
+  shards: z.number().int().min(1).max(256).optional(),
 });
 
 /**
@@ -249,6 +256,8 @@ export const PricingSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('third-party'), provider: z.string() }),
   /** Pay per API request (SQS). Each message takes `requestsPerMessage` requests: send, receive, delete. */
   z.object({ kind: z.literal('per-request'), perMillionUsd: z.number().nonnegative(), requestsPerMessage: z.number().positive() }),
+  /** Pay per request through the component (API Gateway, CloudFront, Lambda, DynamoDB, S3). `note` says what the price assumes. */
+  z.object({ kind: z.literal('per-million-requests'), perMillionUsd: z.number().nonnegative(), note: z.string() }),
 ]);
 export type Pricing = z.infer<typeof PricingSchema>;
 
